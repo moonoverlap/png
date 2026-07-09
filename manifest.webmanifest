@@ -1,0 +1,17 @@
+{
+  "name": "PNG 배경 제거기",
+  "short_name": "PNG 누끼",
+  "description": "이미지 배경을 투명 PNG로 제거하고 원본 해상도로 저장하는 웹앱",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#295BFF",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "png-background-remover-app-v15-deploy",
+  "version": "1.5.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  }
+}

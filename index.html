@@ -1,0 +1,1336 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PNG 배경 제거기</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="description" content="이미지 배경을 투명 PNG로 제거하고 원본 해상도로 저장하는 웹앱" />
+  <meta name="theme-color" content="#295BFF" />
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: rgba(255, 255, 255, 0.78);
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #dbe3ef;
+      --primary: #295BFF;
+      --primary-2: #4F7BFF;
+      --danger: #ef4444;
+      --shadow: 0 24px 80px rgba(17, 24, 39, 0.12);
+      --radius: 28px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(41, 91, 255, 0.14), transparent 34%),
+        radial-gradient(circle at 90% 15%, rgba(122, 165, 255, 0.22), transparent 30%),
+        linear-gradient(180deg, #ffffff 0%, var(--bg) 100%);
+    }
+
+    body { padding: 28px; }
+
+    .app {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: block;
+      margin: 18px 0 26px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid rgba(41, 91, 255, 0.18);
+      border-radius: 999px;
+      color: var(--primary);
+      background: rgba(41, 91, 255, 0.06);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 66px);
+      letter-spacing: -0.06em;
+      line-height: 0.94;
+    }
+
+    .hero p {
+      margin: 16px 0 0;
+      max-width: 740px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.6;
+    }
+
+    .status-card {
+      min-width: 270px;
+      padding: 18px;
+      border: 1px solid rgba(219, 227, 239, 0.9);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 16px 50px rgba(17, 24, 39, 0.07);
+      backdrop-filter: blur(18px);
+    }
+
+    .status-card strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+
+    .status-card span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 390px 1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .panel {
+      border: 1px solid rgba(219, 227, 239, 0.92);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(20px);
+      overflow: hidden;
+    }
+
+    .control-panel { padding: 22px; }
+
+    .dropzone {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-height: 280px;
+      border: 2px dashed #b8c6dc;
+      border-radius: 24px;
+      background:
+        linear-gradient(135deg, rgba(41, 91, 255, 0.06), rgba(255, 255, 255, 0.8)),
+        #fff;
+      text-align: center;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .dropzone:hover,
+    .dropzone.dragover {
+      border-color: var(--primary);
+      transform: translateY(-1px);
+      box-shadow: 0 18px 50px rgba(41, 91, 255, 0.12);
+    }
+
+    .dropzone input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .upload-icon {
+      width: 76px;
+      height: 76px;
+      margin: 0 auto 16px;
+      border-radius: 24px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: #fff;
+      box-shadow: 0 16px 34px rgba(41, 91, 255, 0.28);
+    }
+
+    .upload-icon svg {
+      width: 34px;
+      height: 34px;
+    }
+
+    .dropzone h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.04em;
+    }
+
+    .dropzone p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .file-meta {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--muted);
+      font-size: 13px;
+      word-break: break-all;
+      display: none;
+    }
+
+    .form-row { margin-top: 18px; }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #374151;
+    }
+
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 13px 14px;
+      background: #fff;
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 17px;
+      padding: 15px 18px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.18s ease;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .btn-primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      box-shadow: 0 14px 30px rgba(41, 91, 255, 0.22);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 38px rgba(41, 91, 255, 0.28);
+    }
+
+    .btn-secondary {
+      border: 1px solid var(--line);
+      color: #111827;
+      background: #fff;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      border-color: #b8c6dc;
+    }
+
+    .progress-wrap {
+      display: none;
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 18px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .progress-text {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .progress {
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5ebf5;
+    }
+
+    .bar {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), var(--primary-2));
+      transition: width 0.2s ease;
+    }
+
+    .notice {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .notice b { color: #374151; }
+
+    .preview-panel {
+      min-height: 650px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .preview-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(219, 227, 239, 0.9);
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .preview-head h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(41, 91, 255, 0.07);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--primary);
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      min-height: 100%;
+      background: var(--line);
+    }
+
+    .preview-box {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 550px;
+      background: #fff;
+    }
+
+    .preview-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      color: #374151;
+      font-size: 13px;
+      font-weight: 800;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .canvas {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      overflow: hidden;
+    }
+
+    .checker {
+      background-color: #fff;
+      background-image:
+        linear-gradient(45deg, #eef2f7 25%, transparent 25%),
+        linear-gradient(-45deg, #eef2f7 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #eef2f7 75%),
+        linear-gradient(-45deg, transparent 75%, #eef2f7 75%);
+      background-size: 26px 26px;
+      background-position: 0 0, 0 13px, 13px -13px, -13px 0px;
+    }
+
+    .canvas img {
+      max-width: 100%;
+      max-height: 470px;
+      object-fit: contain;
+      border-radius: 14px;
+      filter: drop-shadow(0 20px 35px rgba(17, 24, 39, 0.18));
+    }
+
+    .empty {
+      width: min(320px, 80%);
+      padding: 24px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 22px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+      line-height: 1.6;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .compare {
+      display: none;
+      padding: 16px 20px 20px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .compare label { margin-bottom: 10px; }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--primary);
+    }
+
+    .compare-stage {
+      position: relative;
+      display: none;
+      min-height: 500px;
+      margin: 20px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .compare-stage img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 22px;
+    }
+
+    .compare-stage .after-mask {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      width: 50%;
+    }
+
+    .compare-stage .divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 2px;
+      background: var(--primary);
+    }
+
+    .error {
+      display: none;
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      background: rgba(239, 68, 68, 0.07);
+      color: #991b1b;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 980px) {
+      body { padding: 18px; }
+
+      .hero,
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-box {
+        min-height: 410px;
+      }
+
+      .canvas img {
+        max-height: 330px;
+      }
+
+      .status-card {
+        min-width: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">PNG Background Remover</div>
+        <h1>오브젝트는 유지하고<br />배경만 투명하게</h1>
+        <p>흰 배경, 회색 그림자, 밝은 그라데이션을 배경으로 판단해 제거합니다. 파란색 오브젝트, 내부 흰색 라인, 반투명 디테일은 최대한 보존합니다.</p>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel control-panel">
+        <div id="dropzone" class="dropzone">
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" />
+          <div>
+            <div class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 16V4m0 0 4.5 4.5M12 4 7.5 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h2>이미지 업로드</h2>
+            <p>클릭하거나 파일을 끌어오세요.<br />PNG, JPG, WEBP 지원</p>
+          </div>
+        </div>
+
+        <div id="fileMeta" class="file-meta"></div>
+
+        <div class="form-row">
+          <label for="removeMode">제거 방식</label>
+          <select id="removeMode">
+            <option value="background_only" selected>배경만 제거 · 아이콘/상품컷 권장</option>
+            <option value="ai_foreground">AI 피사체 인식 · 복잡한 배경용</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="qualitySelect">처리 품질</label>
+          <select id="qualitySelect">
+            <option value="fast">빠름 · 기본 배경 제거</option>
+            <option value="standard" selected>표준 · 권장</option>
+            <option value="high">고품질 · 그림자/그라데이션 제거 강화</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="sensitivitySelect">배경 제거 감도</label>
+          <select id="sensitivitySelect">
+            <option value="low">낮음 · 오브젝트 보존 우선</option>
+            <option value="standard" selected>표준 · 권장</option>
+            <option value="high">높음 · 흰 배경/그림자 더 제거</option>
+            <option value="max">최대 · 남은 흰 배경 강제 제거</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="outputScaleSelect">저장 해상도</label>
+          <select id="outputScaleSelect">
+            <option value="1" selected>원본 해상도 유지 · 권장</option>
+            <option value="2">2배 고해상도 저장</option>
+            <option value="4">4배 고해상도 저장 · 큰 이미지 주의</option>
+          </select>
+        </div>
+
+        <div class="form-row" id="modelRow" style="display:none;">
+          <label for="modelSelect">AI 모델 품질</label>
+          <select id="modelSelect">
+            <option value="isnet_fp16" selected>표준 품질 · 권장</option>
+            <option value="isnet_quint8">빠른 처리 · 가벼운 모델</option>
+            <option value="isnet">고품질 · 느릴 수 있음</option>
+          </select>
+        </div>
+
+        <div class="actions">
+          <button id="removeBtn" class="btn-primary" disabled>배경 제거하기</button>
+          <button id="downloadBtn" class="btn-secondary" disabled>투명 PNG 다운로드</button>
+          <button id="resetBtn" class="btn-secondary" disabled>새 이미지로 다시 시작</button>
+        </div>
+
+        <div id="progressWrap" class="progress-wrap">
+          <div class="progress-text">
+            <span id="progressLabel">준비 중</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress">
+            <div id="progressBar" class="bar"></div>
+          </div>
+        </div>
+
+        <div id="errorBox" class="error"></div>
+
+        <p class="notice">
+          <b>권장 설정</b><br />
+          다운로드 PNG는 미리보기 크기가 아니라 <b>원본 픽셀 해상도</b> 기준으로 저장됩니다.
+          더 크게 저장해야 하면 저장 해상도를 2배 또는 4배로 선택하세요.
+        </p>
+      </aside>
+
+      <section class="panel preview-panel">
+        <div class="preview-head">
+          <h2>미리보기</h2>
+          <div class="pill"><span class="dot"></span><span id="stateText">대기 중</span></div>
+        </div>
+
+        <div id="previewGrid" class="preview-grid">
+          <div class="preview-box">
+            <div class="preview-title">
+              <span>원본 이미지</span>
+              <span id="originalSize">-</span>
+            </div>
+            <div id="originalCanvas" class="canvas">
+              <div class="empty">업로드한 원본 이미지가 여기에 표시됩니다.</div>
+            </div>
+          </div>
+
+          <div class="preview-box">
+            <div class="preview-title">
+              <span>투명 PNG 결과</span>
+              <span id="resultSize">-</span>
+            </div>
+            <div id="resultCanvas" class="canvas checker">
+              <div class="empty">배경 제거 결과가 여기에 표시됩니다.</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="compareStage" class="compare-stage checker" aria-hidden="true">
+          <img id="compareBefore" alt="원본 비교 이미지" />
+          <div id="afterMask" class="after-mask">
+            <img id="compareAfter" alt="결과 비교 이미지" />
+          </div>
+          <div id="divider" class="divider"></div>
+        </div>
+
+        <div id="compareControls" class="compare">
+          <label for="compareRange">원본 / 결과 비교</label>
+          <input id="compareRange" type="range" min="0" max="100" value="50" />
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module">
+    const moduleUrl = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm";
+
+    const fileInput = document.getElementById("fileInput");
+    const dropzone = document.getElementById("dropzone");
+    const fileMeta = document.getElementById("fileMeta");
+    const removeMode = document.getElementById("removeMode");
+    const qualitySelect = document.getElementById("qualitySelect");
+    const sensitivitySelect = document.getElementById("sensitivitySelect");
+    const outputScaleSelect = document.getElementById("outputScaleSelect");
+    const modelRow = document.getElementById("modelRow");
+    const modelSelect = document.getElementById("modelSelect");
+    const removeBtn = document.getElementById("removeBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const progressWrap = document.getElementById("progressWrap");
+    const progressLabel = document.getElementById("progressLabel");
+    const progressPercent = document.getElementById("progressPercent");
+    const progressBar = document.getElementById("progressBar");
+    const errorBox = document.getElementById("errorBox");
+    const stateText = document.getElementById("stateText");
+
+    const originalCanvas = document.getElementById("originalCanvas");
+    const resultCanvas = document.getElementById("resultCanvas");
+    const originalSize = document.getElementById("originalSize");
+    const resultSize = document.getElementById("resultSize");
+
+    const compareStage = document.getElementById("compareStage");
+    const compareControls = document.getElementById("compareControls");
+    const compareRange = document.getElementById("compareRange");
+    const compareBefore = document.getElementById("compareBefore");
+    const compareAfter = document.getElementById("compareAfter");
+    const afterMask = document.getElementById("afterMask");
+    const divider = document.getElementById("divider");
+
+    let removeBackgroundFn = null;
+    let currentFile = null;
+    let originalUrl = null;
+    let resultBlob = null;
+    let resultUrl = null;
+    let originalPixelWidth = 0;
+    let originalPixelHeight = 0;
+    let resultPixelWidth = 0;
+    let resultPixelHeight = 0;
+    let isProcessing = false;
+
+    function formatBytes(bytes) {
+      if (!bytes && bytes !== 0) return "-";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+      }
+      return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+    }
+
+    function setState(text) {
+      stateText.textContent = text;
+    }
+
+    function setError(message) {
+      errorBox.style.display = message ? "block" : "none";
+      errorBox.textContent = message || "";
+    }
+
+    function setProgress(label, percent) {
+      progressWrap.style.display = "block";
+      progressLabel.textContent = label;
+      const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+      progressPercent.textContent = `${safePercent}%`;
+      progressBar.style.width = `${safePercent}%`;
+    }
+
+    function clearProgress() {
+      progressWrap.style.display = "none";
+      progressBar.style.width = "0%";
+      progressPercent.textContent = "0%";
+      progressLabel.textContent = "준비 중";
+    }
+
+    function revokeUrls() {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+      originalUrl = null;
+      resultUrl = null;
+    }
+
+    function resetResultOnly() {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+      resultUrl = null;
+      resultBlob = null;
+      resultCanvas.innerHTML = `<div class="empty">배경 제거 결과가 여기에 표시됩니다.</div>`;
+      resultSize.textContent = "-";
+      downloadBtn.disabled = true;
+      compareStage.style.display = "none";
+      compareControls.style.display = "none";
+    }
+
+    function resetAll() {
+      revokeUrls();
+      currentFile = null;
+      resultBlob = null;
+      originalPixelWidth = 0;
+      originalPixelHeight = 0;
+      resultPixelWidth = 0;
+      resultPixelHeight = 0;
+      fileInput.value = "";
+      fileMeta.style.display = "none";
+      fileMeta.textContent = "";
+      originalCanvas.innerHTML = `<div class="empty">업로드한 원본 이미지가 여기에 표시됩니다.</div>`;
+      resultCanvas.innerHTML = `<div class="empty">배경 제거 결과가 여기에 표시됩니다.</div>`;
+      originalSize.textContent = "-";
+      resultSize.textContent = "-";
+      removeBtn.disabled = true;
+      downloadBtn.disabled = true;
+      resetBtn.disabled = true;
+      clearProgress();
+      setError("");
+      setState("대기 중");
+      compareStage.style.display = "none";
+      compareControls.style.display = "none";
+    }
+
+    function renderImage(container, url, alt) {
+      const img = new Image();
+      img.alt = alt;
+      img.src = url;
+      container.innerHTML = "";
+      container.appendChild(img);
+    }
+
+    function readImageDimensions(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const image = new Image();
+
+        image.onload = () => {
+          const width = image.naturalWidth || image.width;
+          const height = image.naturalHeight || image.height;
+          URL.revokeObjectURL(url);
+          resolve({ width, height });
+        };
+
+        image.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("이미지 해상도를 읽지 못했습니다."));
+        };
+
+        image.src = url;
+      });
+    }
+
+    function getOutputScale() {
+      const value = Number(outputScaleSelect.value || 1);
+      return Number.isFinite(value) && value > 0 ? value : 1;
+    }
+
+    function getOutputSizeLabel(width, height, scale) {
+      if (!width || !height) return "-";
+      const scaledWidth = Math.round(width * scale);
+      const scaledHeight = Math.round(height * scale);
+      return `${scaledWidth.toLocaleString()} × ${scaledHeight.toLocaleString()} px`;
+    }
+
+    async function handleFile(file) {
+      if (!file) return;
+
+      const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
+      if (!allowedTypes.includes(file.type)) {
+        setError("지원하지 않는 파일 형식입니다. PNG, JPG, WEBP 이미지만 업로드하세요.");
+        return;
+      }
+
+      revokeUrls();
+      resetResultOnly();
+      setError("");
+      clearProgress();
+
+      currentFile = file;
+      originalUrl = URL.createObjectURL(file);
+
+      const dimensions = await readImageDimensions(file);
+      originalPixelWidth = dimensions.width;
+      originalPixelHeight = dimensions.height;
+      resultPixelWidth = 0;
+      resultPixelHeight = 0;
+
+      fileMeta.style.display = "block";
+      fileMeta.textContent = `${file.name} · ${formatBytes(file.size)} · ${originalPixelWidth.toLocaleString()} × ${originalPixelHeight.toLocaleString()} px`;
+      originalSize.textContent = `${originalPixelWidth.toLocaleString()} × ${originalPixelHeight.toLocaleString()} px`;
+      resultSize.textContent = getOutputSizeLabel(originalPixelWidth, originalPixelHeight, getOutputScale());
+      renderImage(originalCanvas, originalUrl, "업로드한 원본 이미지");
+
+      removeBtn.disabled = false;
+      resetBtn.disabled = false;
+      setState("이미지 준비 완료");
+    }
+
+    function blobToImage(source) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(source);
+        const image = new Image();
+
+        image.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(image);
+        };
+
+        image.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("이미지를 읽지 못했습니다."));
+        };
+
+        image.src = url;
+      });
+    }
+
+    function canvasToPngBlob(canvas) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("PNG 변환에 실패했습니다."));
+            return;
+          }
+          resolve(blob);
+        }, "image/png");
+      });
+    }
+
+    function median(values) {
+      const sorted = values.slice().sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)] || 255;
+    }
+
+    function estimateBackgroundColor(data, width, height) {
+      const rs = [];
+      const gs = [];
+      const bs = [];
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 90));
+
+      for (let x = 0; x < width; x += step) {
+        collectPixel(x, 0);
+        collectPixel(x, height - 1);
+      }
+
+      for (let y = 0; y < height; y += step) {
+        collectPixel(0, y);
+        collectPixel(width - 1, y);
+      }
+
+      function collectPixel(x, y) {
+        const idx = (y * width + x) * 4;
+        rs.push(data[idx]);
+        gs.push(data[idx + 1]);
+        bs.push(data[idx + 2]);
+      }
+
+      return {
+        r: median(rs),
+        g: median(gs),
+        b: median(bs)
+      };
+    }
+
+    function colorDistance(r, g, b, bg) {
+      const dr = r - bg.r;
+      const dg = g - bg.g;
+      const db = b - bg.b;
+      return Math.sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    function getChroma(r, g, b) {
+      return Math.max(r, g, b) - Math.min(r, g, b);
+    }
+
+    function isBlueProtected(r, g, b) {
+      const avg = (r + g + b) / 3;
+      const chroma = getChroma(r, g, b);
+      const blueBias = b - Math.max(r, g);
+      const purpleBias = (b + r) / 2 - g;
+
+      if (b > 150 && blueBias > 8 && chroma > 18) return true;
+      if (b > 165 && purpleBias > 10 && avg < 238 && chroma > 14) return true;
+      if (r < 225 && g < 230 && b > 235 && chroma > 16) return true;
+
+      return false;
+    }
+
+    function getParams(quality, sensitivity) {
+      const table = {
+        fast: {
+          low:      { floodTolerance: 26, whiteLimit: 250, neutralChroma: 9, shadowLimit: 238, feather: 8, passes: 1 },
+          standard: { floodTolerance: 34, whiteLimit: 248, neutralChroma: 12, shadowLimit: 232, feather: 12, passes: 1 },
+          high:     { floodTolerance: 44, whiteLimit: 246, neutralChroma: 15, shadowLimit: 224, feather: 16, passes: 1 },
+          max:      { floodTolerance: 54, whiteLimit: 244, neutralChroma: 18, shadowLimit: 216, feather: 18, passes: 1 }
+        },
+        standard: {
+          low:      { floodTolerance: 34, whiteLimit: 248, neutralChroma: 12, shadowLimit: 234, feather: 12, passes: 2 },
+          standard: { floodTolerance: 46, whiteLimit: 246, neutralChroma: 16, shadowLimit: 226, feather: 18, passes: 2 },
+          high:     { floodTolerance: 60, whiteLimit: 243, neutralChroma: 22, shadowLimit: 216, feather: 24, passes: 2 },
+          max:      { floodTolerance: 74, whiteLimit: 240, neutralChroma: 28, shadowLimit: 206, feather: 28, passes: 2 }
+        },
+        high: {
+          low:      { floodTolerance: 42, whiteLimit: 247, neutralChroma: 14, shadowLimit: 230, feather: 16, passes: 3 },
+          standard: { floodTolerance: 58, whiteLimit: 244, neutralChroma: 20, shadowLimit: 218, feather: 24, passes: 3 },
+          high:     { floodTolerance: 76, whiteLimit: 240, neutralChroma: 28, shadowLimit: 206, feather: 32, passes: 3 },
+          max:      { floodTolerance: 96, whiteLimit: 236, neutralChroma: 36, shadowLimit: 192, feather: 38, passes: 3 }
+        }
+      };
+
+      return table[quality]?.[sensitivity] || table.standard.standard;
+    }
+
+    async function removeConnectedBackground(originalFile, quality, sensitivity, outputScale = 1) {
+      const image = await blobToImage(originalFile);
+      const originalWidth = image.naturalWidth || image.width;
+      const originalHeight = image.naturalHeight || image.height;
+      const scale = Math.max(1, Number(outputScale) || 1);
+      const width = Math.round(originalWidth * scale);
+      const height = Math.round(originalHeight * scale);
+
+      const sourceCanvas = document.createElement("canvas");
+      const outputCanvas = document.createElement("canvas");
+      sourceCanvas.width = outputCanvas.width = width;
+      sourceCanvas.height = outputCanvas.height = height;
+
+      const sourceCtx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+      const outputCtx = outputCanvas.getContext("2d", { willReadFrequently: true });
+
+      sourceCtx.imageSmoothingEnabled = true;
+      sourceCtx.imageSmoothingQuality = "high";
+      sourceCtx.drawImage(image, 0, 0, width, height);
+
+      const sourceData = sourceCtx.getImageData(0, 0, width, height);
+      const outputData = outputCtx.createImageData(width, height);
+      const data = sourceData.data;
+      const bg = estimateBackgroundColor(data, width, height);
+      const params = getParams(quality, sensitivity);
+
+      const total = width * height;
+      const bgMask = new Uint8Array(total);
+      const queue = [];
+      let head = 0;
+
+      function isNeutralBrightBackground(index) {
+        const p = index * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const a = data[p + 3];
+
+        if (a < 8) return true;
+        if (isBlueProtected(r, g, b)) return false;
+
+        const avg = (r + g + b) / 3;
+        const chroma = getChroma(r, g, b);
+        const dist = colorDistance(r, g, b, bg);
+
+        if (dist <= params.floodTolerance) return true;
+
+        if (avg >= params.whiteLimit && chroma <= params.neutralChroma + 8) return true;
+
+        if (avg >= params.shadowLimit && chroma <= params.neutralChroma) return true;
+
+        if (bg.r > 238 && bg.g > 238 && bg.b > 238) {
+          const grayShadow = Math.abs(r - g) < params.neutralChroma && Math.abs(g - b) < params.neutralChroma && avg > params.shadowLimit;
+          if (grayShadow) return true;
+        }
+
+        return false;
+      }
+
+      function enqueue(index) {
+        if (index < 0 || index >= total || bgMask[index]) return;
+        if (!isNeutralBrightBackground(index)) return;
+        bgMask[index] = 1;
+        queue.push(index);
+      }
+
+      for (let x = 0; x < width; x++) {
+        enqueue(x);
+        enqueue((height - 1) * width + x);
+      }
+
+      for (let y = 0; y < height; y++) {
+        enqueue(y * width);
+        enqueue(y * width + width - 1);
+      }
+
+      while (head < queue.length) {
+        const index = queue[head++];
+        const x = index % width;
+        const y = Math.floor(index / width);
+
+        if (x > 0) enqueue(index - 1);
+        if (x < width - 1) enqueue(index + 1);
+        if (y > 0) enqueue(index - width);
+        if (y < height - 1) enqueue(index + width);
+      }
+
+      function neighborBackgroundScore(index) {
+        const x = index % width;
+        const y = Math.floor(index / width);
+        let score = 0;
+        let count = 0;
+
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+            count++;
+            if (bgMask[ny * width + nx]) score++;
+          }
+        }
+
+        return count ? score / count : 0;
+      }
+
+      for (let pass = 0; pass < params.passes; pass++) {
+        const additions = [];
+        for (let i = 0; i < total; i++) {
+          if (bgMask[i]) continue;
+
+          const p = i * 4;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          if (isBlueProtected(r, g, b)) continue;
+
+          const avg = (r + g + b) / 3;
+          const chroma = getChroma(r, g, b);
+          const neighborScore = neighborBackgroundScore(i);
+
+          if (neighborScore >= 0.42 && avg >= params.shadowLimit && chroma <= params.neutralChroma + 6) {
+            additions.push(i);
+          }
+        }
+
+        for (const index of additions) {
+          bgMask[index] = 1;
+        }
+      }
+
+      function getAlphaForForeground(index) {
+        const p = index * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const a = data[p + 3];
+
+        if (a < 8) return 0;
+        if (bgMask[index]) return 0;
+        if (isBlueProtected(r, g, b)) return a;
+
+        const avg = (r + g + b) / 3;
+        const chroma = getChroma(r, g, b);
+        const dist = colorDistance(r, g, b, bg);
+        const neighborScore = neighborBackgroundScore(index);
+
+        if (neighborScore > 0.20 && avg > params.shadowLimit && chroma <= params.neutralChroma) {
+          const keep = Math.max(0, Math.min(1, (dist - params.floodTolerance) / Math.max(1, params.feather)));
+          if (keep < 0.18) return 0;
+          return Math.max(35, Math.round(255 * keep));
+        }
+
+        if (sensitivity === "max" && avg > params.whiteLimit && chroma <= params.neutralChroma + 4 && neighborScore > 0.04) {
+          return 0;
+        }
+
+        return a;
+      }
+
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        outputData.data[p] = data[p];
+        outputData.data[p + 1] = data[p + 1];
+        outputData.data[p + 2] = data[p + 2];
+        outputData.data[p + 3] = getAlphaForForeground(i);
+      }
+
+      outputCtx.putImageData(outputData, 0, 0);
+      return canvasToPngBlob(outputCanvas);
+    }
+
+    async function loadRemovalModule() {
+      if (removeBackgroundFn) return removeBackgroundFn;
+
+      setState("AI 모듈 로딩");
+      setProgress("AI 모듈 로딩", 8);
+
+      const mod = await import(moduleUrl);
+      removeBackgroundFn = mod.default || mod.removeBackground;
+
+      if (typeof removeBackgroundFn !== "function") {
+        throw new Error("배경 제거 모듈을 불러오지 못했습니다.");
+      }
+
+      return removeBackgroundFn;
+    }
+
+    async function rebuildPngWithOriginalColor(originalFile, maskBlob, outputScale = 1) {
+      const [originalImage, maskImage] = await Promise.all([
+        blobToImage(originalFile),
+        blobToImage(maskBlob)
+      ]);
+
+      const originalWidth = originalImage.naturalWidth || originalImage.width;
+      const originalHeight = originalImage.naturalHeight || originalImage.height;
+      const scale = Math.max(1, Number(outputScale) || 1);
+      const width = Math.round(originalWidth * scale);
+      const height = Math.round(originalHeight * scale);
+
+      const originalCanvasEl = document.createElement("canvas");
+      const maskCanvasEl = document.createElement("canvas");
+      const outputCanvasEl = document.createElement("canvas");
+
+      originalCanvasEl.width = maskCanvasEl.width = outputCanvasEl.width = width;
+      originalCanvasEl.height = maskCanvasEl.height = outputCanvasEl.height = height;
+
+      const originalCtx = originalCanvasEl.getContext("2d", { willReadFrequently: true });
+      const maskCtx = maskCanvasEl.getContext("2d", { willReadFrequently: true });
+      const outputCtx = outputCanvasEl.getContext("2d", { willReadFrequently: true });
+
+      originalCtx.drawImage(originalImage, 0, 0, width, height);
+      maskCtx.drawImage(maskImage, 0, 0, width, height);
+
+      const originalData = originalCtx.getImageData(0, 0, width, height);
+      const maskData = maskCtx.getImageData(0, 0, width, height);
+      const outputData = outputCtx.createImageData(width, height);
+
+      for (let i = 0; i < maskData.data.length; i += 4) {
+        const alpha = maskData.data[i + 3] < 12 ? 0 : maskData.data[i + 3];
+
+        outputData.data[i] = originalData.data[i];
+        outputData.data[i + 1] = originalData.data[i + 1];
+        outputData.data[i + 2] = originalData.data[i + 2];
+        outputData.data[i + 3] = alpha;
+      }
+
+      outputCtx.putImageData(outputData, 0, 0);
+      return canvasToPngBlob(outputCanvasEl);
+    }
+
+    async function runAiForegroundMode() {
+      const removeFn = await loadRemovalModule();
+
+      const modelByQuality = {
+        fast: "isnet_quint8",
+        standard: "isnet_fp16",
+        high: "isnet"
+      };
+
+      const config = {
+        model: modelSelect.value || modelByQuality[qualitySelect.value] || "isnet_fp16",
+        device: "cpu",
+        output: {
+          format: "image/png",
+          type: "foreground"
+        },
+        progress: (key, current, total) => {
+          const label = key ? `${key} 다운로드` : "AI 처리 중";
+          if (total && total > 0) {
+            const mapped = 10 + (current / total) * 72;
+            setProgress(label, mapped);
+          } else {
+            setProgress("AI 처리 중", 70);
+          }
+        }
+      };
+
+      const rawMaskBlob = await removeFn(currentFile, config);
+      setProgress("원본 색상 재합성", 90);
+      return rebuildPngWithOriginalColor(currentFile, rawMaskBlob, getOutputScale());
+    }
+
+    async function removeBackground() {
+      if (!currentFile || isProcessing) return;
+
+      isProcessing = true;
+      setError("");
+      resetResultOnly();
+      removeBtn.disabled = true;
+      downloadBtn.disabled = true;
+      removeMode.disabled = true;
+      qualitySelect.disabled = true;
+      sensitivitySelect.disabled = true;
+      outputScaleSelect.disabled = true;
+      modelSelect.disabled = true;
+
+      try {
+        if (removeMode.value === "background_only") {
+          setState("배경 영역 분석 중");
+          setProgress("흰 배경/그림자 분석", 18);
+          resultBlob = await removeConnectedBackground(currentFile, qualitySelect.value, sensitivitySelect.value, getOutputScale());
+          setProgress("투명 PNG 생성", 92);
+        } else {
+          setState("AI 피사체 인식 중");
+          resultBlob = await runAiForegroundMode();
+        }
+
+        const scale = getOutputScale();
+        resultPixelWidth = Math.round(originalPixelWidth * scale);
+        resultPixelHeight = Math.round(originalPixelHeight * scale);
+        resultUrl = URL.createObjectURL(resultBlob);
+
+        renderImage(resultCanvas, resultUrl, "배경 제거된 투명 PNG 결과");
+        resultSize.textContent = `${resultPixelWidth.toLocaleString()} × ${resultPixelHeight.toLocaleString()} px · ${formatBytes(resultBlob.size)}`;
+        downloadBtn.disabled = false;
+
+        compareBefore.src = originalUrl;
+        compareAfter.src = resultUrl;
+        compareStage.style.display = "block";
+        compareControls.style.display = "block";
+        compareRange.value = "50";
+        updateCompare(50);
+
+        setProgress("완료", 100);
+        setState("완료");
+      } catch (error) {
+        console.error(error);
+        setState("오류 발생");
+        setError(
+          "배경 제거에 실패했습니다. 브라우저 버전, 파일 형식, 파일 용량을 확인하세요. Chrome 또는 Edge 최신 버전을 권장합니다."
+        );
+      } finally {
+        isProcessing = false;
+        removeBtn.disabled = !currentFile;
+        removeMode.disabled = false;
+        qualitySelect.disabled = false;
+        sensitivitySelect.disabled = false;
+        outputScaleSelect.disabled = false;
+        modelSelect.disabled = false;
+      }
+    }
+
+    function downloadResult() {
+      if (!resultBlob || !resultUrl || !currentFile) return;
+
+      const cleanName = currentFile.name.replace(/\.[^.]+$/, "");
+      const link = document.createElement("a");
+      link.href = resultUrl;
+      link.download = `${cleanName}_t.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    function updateCompare(value) {
+      afterMask.style.width = `${value}%`;
+      divider.style.left = `${value}%`;
+    }
+
+    removeMode.addEventListener("change", () => {
+      modelRow.style.display = removeMode.value === "ai_foreground" ? "block" : "none";
+    });
+
+    outputScaleSelect.addEventListener("change", () => {
+      if (!currentFile || resultBlob) return;
+      resultSize.textContent = getOutputSizeLabel(originalPixelWidth, originalPixelHeight, getOutputScale());
+    });
+
+    fileInput.addEventListener("change", (event) => {
+      handleFile(event.target.files?.[0]);
+    });
+
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragover");
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropzone.classList.remove("dragover");
+      handleFile(event.dataTransfer.files?.[0]);
+    });
+
+    removeBtn.addEventListener("click", removeBackground);
+    downloadBtn.addEventListener("click", downloadResult);
+    resetBtn.addEventListener("click", resetAll);
+    compareRange.addEventListener("input", (event) => updateCompare(event.target.value));
+
+    window.addEventListener("beforeunload", revokeUrls);
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {
+          // 정적 호스팅 환경이 아니면 서비스워커 등록 실패 가능. 앱 실행에는 영향 없음.
+        });
+      });
+    }
+  </script>
+</body>
+</html>
