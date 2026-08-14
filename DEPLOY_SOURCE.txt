@@ -1,0 +1,2 @@
+Source ZIP: image-toolkit-v60.zip
+Detected app root: .

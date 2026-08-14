@@ -1,4 +1,4 @@
-const CACHE_NAME = "png-bg-remover-v44-remover-studio";
+const CACHE_NAME = "image-toolkit-v60-multi-tool";
 const APP_SHELL = [
   "./",
   "./index.html",

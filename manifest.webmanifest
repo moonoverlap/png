@@ -1,7 +1,7 @@
 {
-  "name": "Remover studio",
-  "short_name": "Remover",
-  "description": "정확도 기준 엔진을 유지한 배경 제거 스튜디오",
+  "name": "Remover Studio · 이미지 툴킷",
+  "short_name": "ImgToolkit",
+  "description": "배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화를 지원하는 이미지 편집 툴킷",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
