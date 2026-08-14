@@ -1,3 +1,12 @@
+# Copyright
+
+© 2026 Moonoverlap. All rights reserved.
+
+본 프로젝트의 코드, UI, 디자인, 로직 및 관련 산출물은 Moonoverlap에게 저작권이 있습니다.  
+무단 복제, 배포, 수정, 재판매, 재배포, 게시, 호스팅 및 상업적 이용을 금지합니다.
+
+---
+
 # Remover studio v4.4
 
 기준일: 2026-08-12
