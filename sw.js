@@ -1,4 +1,4 @@
-const CACHE_NAME = "png-bg-remover-v15";
+const CACHE_NAME = "png-bg-remover-v44-remover-studio";
 const APP_SHELL = [
   "./",
   "./index.html",

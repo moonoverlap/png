@@ -1,7 +1,7 @@
 {
-  "name": "PNG 배경 제거기",
-  "short_name": "PNG 누끼",
-  "description": "이미지 배경을 투명 PNG로 제거하고 원본 해상도로 저장하는 웹앱",
+  "name": "Remover studio",
+  "short_name": "Remover",
+  "description": "정확도 기준 엔진을 유지한 배경 제거 스튜디오",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
