@@ -1,6 +1,6 @@
 {
-  "name": "png-background-studio-v44-remover-studio",
-  "version": "4.4.0",
+  "name": "image-toolkit-v71-subject-protect",
+  "version": "7.1.0",
   "private": true,
   "scripts": {
     "start": "node server.js"

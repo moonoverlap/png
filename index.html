@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v7.1 subject white protection: protects white package/label areas from background flood-fill -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
   <!-- v4.3 accuracy restore: deployed v1.5 engine preserved -->
@@ -373,7 +374,8 @@
       color: #374151;
     }
 
-    select {
+    select,
+    input[type="number"] {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -384,7 +386,8 @@
       outline: none;
     }
 
-    select:disabled { opacity: 0.5; }
+    select:disabled,
+    input[type="number"]:disabled { opacity: 0.5; }
 
     .crop-row {
       padding: 14px;
@@ -619,7 +622,8 @@
       flex-shrink: 0;
     }
 
-    .queue-thumb img {
+    .queue-thumb img,
+    .queue-thumb video {
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -780,6 +784,37 @@
       filter: drop-shadow(0 20px 35px rgba(17, 24, 39, 0.18));
     }
 
+    .canvas video {
+      max-width: 100%;
+      max-height: 400px;
+      border-radius: 14px;
+      background: #000;
+      box-shadow: 0 20px 35px rgba(17, 24, 39, 0.18);
+    }
+
+    .trim-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .trim-row input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 13px;
+      font-size: 13px;
+      outline: none;
+      background: #fff;
+    }
+
+    .trim-set-btn {
+      padding: 12px 12px;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+
     .empty {
       width: min(320px, 80%);
       padding: 24px;
@@ -863,40 +898,13 @@
       .preview-head h2 { max-width: 100%; }
     }
   </style>
-  <meta name="copyright" content="© 2026 Moonoverlap. All rights reserved. Unauthorized copying, redistribution, modification, or commercial use is prohibited.">
-  <meta name="rights" content="All rights reserved. 무단 복제, 배포, 수정, 상업적 이용을 금지합니다.">
-  <!--
-    Copyright © 2026 Moonoverlap. All rights reserved.
-    본 웹앱의 코드, UI, 디자인, 로직, 문구 및 관련 산출물의 저작권은 Moonoverlap에게 있습니다.
-    무단 복제, 배포, 수정, 재판매, 재배포, 상업적 이용을 금지합니다.
-  -->
-
-  <style id="copyright-notice-style">
-    .copyright-notice {
-      width: 100%;
-      padding: 18px 20px;
-      text-align: center;
-      color: #8a8f9c;
-      font-size: 12px;
-      line-height: 1.6;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-      background: rgba(248, 250, 252, 0.92);
-      border-top: 1px solid rgba(226, 232, 240, 0.9);
-    }
-    .copyright-notice strong {
-      color: #596174;
-      font-weight: 800;
-    }
-  </style>
-
 </head>
 <body>
   <main class="app">
     <section class="hero">
       <div class="eyebrow">Image Toolkit · Batch</div>
       <h1>Remover Studio</h1>
-      <p>배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화까지 한 곳에서 처리하세요. 여러 장을 한 번에 올려 배치로 작업할 수 있습니다.</p>
+      <p>배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화부터 동영상 압축·GIF 압축·동영상 클립을 GIF로 만드는 것까지 한 곳에서 처리하세요. 여러 파일을 한 번에 올려 배치로 작업할 수 있습니다.</p>
     </section>
 
     <nav class="tool-nav" id="toolNav">
@@ -905,6 +913,9 @@
       <button type="button" class="tool-nav-btn" data-tool="convert">포맷 변환</button>
       <button type="button" class="tool-nav-btn" data-tool="crop">자르기</button>
       <button type="button" class="tool-nav-btn" data-tool="vectorize">벡터화</button>
+      <button type="button" class="tool-nav-btn" data-tool="videoCompress">동영상 압축</button>
+      <button type="button" class="tool-nav-btn" data-tool="gifCompress">GIF 압축</button>
+      <button type="button" class="tool-nav-btn" data-tool="videoToGif">동영상→GIF</button>
     </nav>
 
     <section class="workspace">
@@ -926,7 +937,7 @@
                 </svg>
               </div>
               <h2>이미지 업로드</h2>
-              <p>클릭하거나 여러 파일을 한 번에 끌어오세요.<br />PNG, JPG, WEBP · 다중 선택 지원</p>
+              <p>클릭하거나 여러 파일을 한 번에 끌어오세요.<br /><span id="dropzoneHint">PNG, JPG, WEBP · 다중 선택 지원</span></p>
             </div>
           </div>
         </div>
@@ -969,7 +980,7 @@
           <div class="form-row">
             <label for="removeMode">제거 방식</label>
             <select id="removeMode">
-              <option value="background_only" selected>배경만 제거 · 아이콘/상품컷 권장</option>
+              <option value="background_only" selected>배경만 제거 · 피사체/흰 라벨 보호</option>
               <option value="ai_foreground">AI 피사체 인식 · 복잡한 배경용</option>
             </select>
           </div>
@@ -1125,6 +1136,96 @@
           <p class="notice">벡터화는 이미지 크기와 디테일 설정에 따라 시간이 걸릴 수 있습니다. 결과는 SVG 파일로 저장됩니다.</p>
         </div>
 
+        <div id="optsVideoCompress" class="tool-options">
+          <div class="form-row">
+            <label for="vcResolutionSelect">해상도</label>
+            <select id="vcResolutionSelect">
+              <option value="original" selected>원본 유지</option>
+              <option value="1920">1080p 이하로 축소</option>
+              <option value="1280">720p 이하로 축소</option>
+              <option value="854">480p 이하로 축소</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="vcModeSelect">압축 방식</label>
+            <select id="vcModeSelect">
+              <option value="targetSize" selected>목표 용량(MB) 지정</option>
+              <option value="crf">화질 우선 (CRF)</option>
+            </select>
+          </div>
+
+          <div class="form-row" id="vcTargetSizeRow">
+            <label for="vcTargetSizeInput">목표 용량 (MB)</label>
+            <input type="number" id="vcTargetSizeInput" min="1" max="500" value="10" />
+          </div>
+
+          <div class="form-row" id="vcCrfRow" style="display:none;">
+            <label for="vcCrfRange">화질 (CRF, <span id="vcCrfValue">24</span> · 낮을수록 고화질)</label>
+            <input type="range" id="vcCrfRange" min="18" max="35" value="24" />
+          </div>
+
+          <div class="form-row crop-row">
+            <label class="checkbox-label" for="vcRemoveAudio">
+              <input type="checkbox" id="vcRemoveAudio" />
+              <span>오디오 제거 (용량 추가 절감)</span>
+            </label>
+          </div>
+
+          <p class="notice">MP4(H.264)로 저장됩니다. 브라우저 메모리 특성상 1080p·300MB 이하 영상을 권장합니다. 처리는 다소 시간이 걸릴 수 있습니다.</p>
+        </div>
+
+        <div id="optsGifCompress" class="tool-options">
+          <div class="form-row">
+            <label for="gcTargetSizeInput">목표 용량 (MB, 최대 10MB)</label>
+            <input type="number" id="gcTargetSizeInput" min="1" max="10" value="10" />
+          </div>
+
+          <p class="notice">해상도는 그대로 두고 프레임 수·색상 수를 단계적으로 낮춰가며 목표 용량 이하가 될 때까지 자동으로 재시도합니다. 목표를 못 맞추면 가장 근접한 결과를 저장합니다.</p>
+        </div>
+
+        <div id="optsVideoToGif" class="tool-options">
+          <div class="form-row">
+            <label>자를 구간 (초)</label>
+            <div class="trim-row">
+              <input type="number" id="trimStartInput" min="0" step="0.1" value="0" placeholder="시작" />
+              <button type="button" class="btn-secondary trim-set-btn" id="trimSetStartBtn">현재 위치</button>
+            </div>
+            <div class="trim-row" style="margin-top:8px;">
+              <input type="number" id="trimEndInput" min="0" step="0.1" value="3" placeholder="종료" />
+              <button type="button" class="btn-secondary trim-set-btn" id="trimSetEndBtn">현재 위치</button>
+            </div>
+            <p class="notice" id="trimDurationHint" style="margin-top:8px;">원본 미리보기를 재생하면서 "현재 위치" 버튼으로 시작/종료 지점을 지정할 수 있습니다.</p>
+          </div>
+
+          <div class="form-row">
+            <label for="vtgResolutionSelect">GIF 크기 (긴 변 기준)</label>
+            <select id="vtgResolutionSelect">
+              <option value="original">원본 유지</option>
+              <option value="720">720px 이하</option>
+              <option value="480" selected>480px 이하</option>
+              <option value="360">360px 이하</option>
+              <option value="240">240px 이하</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="vtgFpsSelect">프레임 속도</label>
+            <select id="vtgFpsSelect">
+              <option value="24">24fps · 부드러움</option>
+              <option value="15" selected>15fps · 권장</option>
+              <option value="10">10fps · 용량 절감</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="vtgColorsRange">색상 수 (<span id="vtgColorsValue">128</span>단계)</label>
+            <input type="range" id="vtgColorsRange" min="16" max="256" value="128" />
+          </div>
+
+          <p class="notice">최대 10초 정도의 짧은 구간을 권장합니다. 구간이 길거나 해상도가 높으면 결과 용량이 커지고 처리 시간도 늘어납니다.</p>
+        </div>
+
         <div class="actions">
           <button id="startBtn" class="btn-primary" disabled>배경 제거 실행</button>
           <button id="downloadPngBtn" class="btn-secondary" disabled>개별 파일 다운로드</button>
@@ -1257,6 +1358,29 @@
     const vectorizeColorsRange = document.getElementById("vectorizeColorsRange");
     const vectorizeColorsValue = document.getElementById("vectorizeColorsValue");
 
+    const vcResolutionSelect = document.getElementById("vcResolutionSelect");
+    const vcModeSelect = document.getElementById("vcModeSelect");
+    const vcTargetSizeRow = document.getElementById("vcTargetSizeRow");
+    const vcTargetSizeInput = document.getElementById("vcTargetSizeInput");
+    const vcCrfRow = document.getElementById("vcCrfRow");
+    const vcCrfRange = document.getElementById("vcCrfRange");
+    const vcCrfValue = document.getElementById("vcCrfValue");
+    const vcRemoveAudio = document.getElementById("vcRemoveAudio");
+
+    const gcTargetSizeInput = document.getElementById("gcTargetSizeInput");
+
+    const trimStartInput = document.getElementById("trimStartInput");
+    const trimEndInput = document.getElementById("trimEndInput");
+    const trimSetStartBtn = document.getElementById("trimSetStartBtn");
+    const trimSetEndBtn = document.getElementById("trimSetEndBtn");
+    const trimDurationHint = document.getElementById("trimDurationHint");
+    const vtgResolutionSelect = document.getElementById("vtgResolutionSelect");
+    const vtgFpsSelect = document.getElementById("vtgFpsSelect");
+    const vtgColorsRange = document.getElementById("vtgColorsRange");
+    const vtgColorsValue = document.getElementById("vtgColorsValue");
+
+    const dropzoneHint = document.getElementById("dropzoneHint");
+
     const startBtn = document.getElementById("startBtn");
     const downloadPngBtn = document.getElementById("downloadPngBtn");
     const downloadZipBtn = document.getElementById("downloadZipBtn");
@@ -1291,6 +1415,8 @@
     // ---- State ----
     let removeBackgroundFn = null;
     let imageTracerLib = null;
+    let ffmpegInstance = null;
+    let ffmpegProgressContext = null;
     let queueItems = [];
     let selectedItemId = null;
     let isProcessing = false;
@@ -1300,12 +1426,46 @@
     let cropAspect = "free";
     let cropDrag = null;
 
+    let trimRange = { start: 0, end: 3 };
+
     const TOOL_META = {
       removeBg: { runLabel: "배경 제거 실행", suffix: "_t", ext: "png" },
       resize: { runLabel: "크기 조절 실행", suffix: "_resized", ext: "png" },
       convert: { runLabel: "포맷 변환 실행", suffix: "_converted", ext: "png" },
       crop: { runLabel: "자르기 실행", suffix: "_cropped", ext: "png" },
-      vectorize: { runLabel: "벡터화 실행", suffix: "_vector", ext: "svg" }
+      vectorize: { runLabel: "벡터화 실행", suffix: "_vector", ext: "svg" },
+      videoCompress: { runLabel: "동영상 압축 실행", suffix: "_compressed", ext: "mp4" },
+      gifCompress: { runLabel: "GIF 압축 실행", suffix: "_compressed", ext: "gif" },
+      videoToGif: { runLabel: "GIF 만들기 실행", suffix: "_clip", ext: "gif" }
+    };
+
+    const CATEGORY_BY_TOOL = {
+      removeBg: "image",
+      resize: "image",
+      convert: "image",
+      crop: "image",
+      vectorize: "image",
+      videoCompress: "video",
+      gifCompress: "gif",
+      videoToGif: "video"
+    };
+
+    const ALLOWED_TYPES_BY_CATEGORY = {
+      image: ["image/png", "image/jpeg", "image/webp"],
+      video: ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo", "video/x-matroska"],
+      gif: ["image/gif"]
+    };
+
+    const ACCEPT_BY_CATEGORY = {
+      image: "image/png,image/jpeg,image/webp",
+      video: "video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.mov,.avi,.mkv",
+      gif: "image/gif"
+    };
+
+    const HINT_BY_CATEGORY = {
+      image: "PNG, JPG, WEBP · 다중 선택 지원",
+      video: "MP4, WEBM, MOV, AVI, MKV · 다중 선택 지원",
+      gif: "GIF · 다중 선택 지원"
     };
 
     const VECTOR_DETAIL = {
@@ -1336,6 +1496,13 @@
         unit += 1;
       }
       return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+    }
+
+    function formatDuration(seconds) {
+      const s = Math.max(0, Math.round(seconds || 0));
+      const m = Math.floor(s / 60);
+      const rem = s % 60;
+      return `${m}:${String(rem).padStart(2, "0")}`;
     }
 
     function setState(text) {
@@ -1455,10 +1622,14 @@
           li.dataset.id = item.id;
 
           const dimsText = item.dims ? `${item.dims.width}×${item.dims.height}` : "읽는 중";
-          const metaText = `${dimsText} · ${formatBytes(item.file.size)}`;
+          const durationText = item.kind === "video" && item.duration ? ` · ${formatDuration(item.duration)}` : "";
+          const metaText = `${dimsText}${durationText} · ${formatBytes(item.file.size)}`;
+          const thumbHtml = item.kind === "video"
+            ? `<video src="${item.originalUrl}" muted preload="metadata"></video>`
+            : `<img src="${item.originalUrl}" alt="" />`;
 
           li.innerHTML = `
-            <div class="queue-thumb checker"><img src="${item.originalUrl}" alt="" /></div>
+            <div class="queue-thumb checker">${thumbHtml}</div>
             <div class="queue-info">
               <div class="queue-name" title="${item.file.name}">${item.file.name}</div>
               <div class="queue-meta">${metaText}</div>
@@ -1500,6 +1671,15 @@
       container.appendChild(img);
     }
 
+    function renderVideoMedia(container, url) {
+      container.innerHTML = "";
+      const video = document.createElement("video");
+      video.src = url;
+      video.controls = true;
+      container.appendChild(video);
+      return video;
+    }
+
     function renderPreview(item) {
       if (!item) {
         previewTitle.textContent = "미리보기";
@@ -1517,32 +1697,58 @@
 
       if (currentTool === "crop") {
         renderCropStage(item);
+      } else if (item.kind === "video") {
+        const videoEl = renderVideoMedia(originalCanvas, item.originalUrl);
+        if (currentTool === "videoToGif") {
+          videoEl.addEventListener("loadedmetadata", () => {
+            if (trimEndInput.value === "" || Number(trimEndInput.value) === 0) {
+              trimRange = { start: 0, end: Math.min(3, videoEl.duration || 3) };
+              trimStartInput.value = trimRange.start;
+              trimEndInput.value = trimRange.end.toFixed(1);
+            }
+          }, { once: true });
+        }
       } else {
         renderImage(originalCanvas, item.originalUrl, "업로드한 원본 이미지");
       }
 
       originalSize.textContent = item.dims
-        ? `${item.dims.width.toLocaleString()} × ${item.dims.height.toLocaleString()} px`
+        ? `${item.dims.width.toLocaleString()} × ${item.dims.height.toLocaleString()} px${item.kind === "video" && item.duration ? ` · ${formatDuration(item.duration)}` : ""}`
         : "확인 중";
 
-      if (item.status === "done" && item.resultUrl) {
-        renderImage(resultCanvas, item.resultUrl, "처리된 결과 이미지");
+      const isVideoResult = item.resultExt === "mp4" || item.resultExt === "webm";
+      const canCompare = item.kind !== "video" && item.resultExt !== "svg" && !isVideoResult;
 
-        if (item.resultExt === "svg") {
-          resultSize.textContent = `SVG 벡터 · ${formatBytes(item.resultBlob.size)}`;
-        } else {
+      if (item.status === "done" && item.resultUrl) {
+        if (isVideoResult) {
+          renderVideoMedia(resultCanvas, item.resultUrl);
           resultSize.textContent = item.resultDims
             ? `${item.resultDims.width.toLocaleString()} × ${item.resultDims.height.toLocaleString()} px · ${formatBytes(item.resultBlob.size)}`
-            : "-";
+            : formatBytes(item.resultBlob.size);
+        } else {
+          renderImage(resultCanvas, item.resultUrl, "처리된 결과 이미지");
+
+          if (item.resultExt === "svg") {
+            resultSize.textContent = `SVG 벡터 · ${formatBytes(item.resultBlob.size)}`;
+          } else {
+            resultSize.textContent = item.resultDims
+              ? `${item.resultDims.width.toLocaleString()} × ${item.resultDims.height.toLocaleString()} px · ${formatBytes(item.resultBlob.size)}`
+              : "-";
+          }
         }
         previewDownloadBtn.disabled = false;
 
-        compareBefore.src = item.originalUrl;
-        compareAfter.src = item.resultUrl;
-        compareStage.style.display = "block";
-        compareControls.style.display = "block";
-        compareRange.value = "50";
-        updateCompare(50);
+        if (canCompare) {
+          compareBefore.src = item.originalUrl;
+          compareAfter.src = item.resultUrl;
+          compareStage.style.display = "block";
+          compareControls.style.display = "block";
+          compareRange.value = "50";
+          updateCompare(50);
+        } else {
+          compareStage.style.display = "none";
+          compareControls.style.display = "none";
+        }
       } else {
         previewDownloadBtn.disabled = true;
         compareStage.style.display = "none";
@@ -1745,26 +1951,67 @@
     }
 
     // ---- File intake ----
+    function detectKind(file) {
+      if (file.type === "image/gif" || /\.gif$/i.test(file.name || "")) return "gif";
+      if (file.type.startsWith("video/") || /\.(mp4|webm|mov|avi|mkv|m4v)$/i.test(file.name || "")) return "video";
+      return "image";
+    }
+
+    function isAllowedFile(file, category) {
+      const allowedMimes = ALLOWED_TYPES_BY_CATEGORY[category] || [];
+      if (allowedMimes.includes(file.type)) return true;
+
+      if (category === "video") return /\.(mp4|webm|mov|avi|mkv|m4v)$/i.test(file.name || "");
+      if (category === "gif") return /\.gif$/i.test(file.name || "");
+      if (category === "image") return /\.(png|jpe?g|webp)$/i.test(file.name || "");
+      return false;
+    }
+
+    function loadMediaInfo(url, kind) {
+      return new Promise((resolve, reject) => {
+        if (kind === "video") {
+          const video = document.createElement("video");
+          video.preload = "metadata";
+          video.muted = true;
+          video.onloadedmetadata = () => {
+            resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration || 0 });
+          };
+          video.onerror = () => reject(new Error("동영상 정보를 읽지 못했습니다."));
+          video.src = url;
+        } else {
+          const image = new Image();
+          image.onload = () => {
+            resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, duration: 0 });
+          };
+          image.onerror = () => reject(new Error("이미지를 읽지 못했습니다."));
+          image.src = url;
+        }
+      });
+    }
+
     async function addFiles(fileList) {
-      const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
+      const category = CATEGORY_BY_TOOL[currentTool];
       const files = Array.from(fileList || []);
       if (!files.length) return;
 
       let rejected = 0;
 
       for (const file of files) {
-        if (!allowedTypes.includes(file.type)) {
+        if (!isAllowedFile(file, category)) {
           rejected++;
           continue;
         }
 
         const id = generateId();
         const originalUrl = URL.createObjectURL(file);
+        const kind = detectKind(file);
         const item = {
           id,
           file,
           originalUrl,
+          kind,
           dims: null,
+          duration: 0,
           status: "pending",
           resultBlob: null,
           resultUrl: null,
@@ -1774,16 +2021,18 @@
         };
         queueItems.push(item);
 
-        loadDimsFromUrl(originalUrl)
-          .then((dims) => {
-            item.dims = dims;
+        loadMediaInfo(originalUrl, kind)
+          .then((info) => {
+            item.dims = { width: info.width, height: info.height };
+            item.duration = info.duration || 0;
             renderQueue();
             if (selectedItemId === item.id) renderPreview(item);
           })
           .catch(() => {});
       }
 
-      setError(rejected ? `${rejected}개 파일은 지원하지 않는 형식이라 제외했습니다. PNG, JPG, WEBP만 업로드하세요.` : "");
+      const hint = HINT_BY_CATEGORY[category] || "";
+      setError(rejected ? `${rejected}개 파일은 지원하지 않는 형식이라 제외했습니다. ${hint} 형식만 업로드하세요.` : "");
 
       if (!selectedItemId && queueItems.length) {
         selectedItemId = queueItems[0].id;
@@ -1916,6 +2165,22 @@
       vectorizeDetailSelect.disabled = disabled;
       vectorizeColorsRange.disabled = disabled;
 
+      vcResolutionSelect.disabled = disabled;
+      vcModeSelect.disabled = disabled;
+      vcTargetSizeInput.disabled = disabled;
+      vcCrfRange.disabled = disabled;
+      vcRemoveAudio.disabled = disabled;
+
+      gcTargetSizeInput.disabled = disabled;
+
+      trimStartInput.disabled = disabled;
+      trimEndInput.disabled = disabled;
+      trimSetStartBtn.disabled = disabled;
+      trimSetEndBtn.disabled = disabled;
+      vtgResolutionSelect.disabled = disabled;
+      vtgFpsSelect.disabled = disabled;
+      vtgColorsRange.disabled = disabled;
+
       toolNavBtns.forEach((btn) => { btn.disabled = disabled; });
     }
 
@@ -2044,9 +2309,191 @@
       const params = getParams(quality, sensitivity);
 
       const total = width * height;
+
+      // v7.1 subject protection:
+      // White package/label areas can be visually identical to a white background.
+      // If flood-fill sees those whites as background, it punches holes inside the product.
+      // This mask uses printed colors, dark text, food colors, blue package areas, and nearby
+      // enclosed regions to protect the actual subject before background flood-fill runs.
+      const subjectProtectMask = buildSubjectProtectionMask();
+
       const bgMask = new Uint8Array(total);
       const queue = [];
       let head = 0;
+
+      function buildSubjectProtectionMask() {
+        const support = new Uint8Array(total);
+        const protectedMask = new Uint8Array(total);
+        const rowMin = new Int32Array(height);
+        const rowMax = new Int32Array(height);
+        const colMin = new Int32Array(width);
+        const colMax = new Int32Array(width);
+
+        rowMin.fill(width);
+        rowMax.fill(-1);
+        colMin.fill(height);
+        colMax.fill(-1);
+
+        function markSupport(index, x, y) {
+          support[index] = 1;
+          if (x < rowMin[y]) rowMin[y] = x;
+          if (x > rowMax[y]) rowMax[y] = x;
+          if (y < colMin[x]) colMin[x] = y;
+          if (y > colMax[x]) colMax[x] = y;
+        }
+
+        function isStrongSubjectPixel(r, g, b, a) {
+          if (a < 8) return false;
+
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          const avg = (r + g + b) / 3;
+          const chroma = max - min;
+          const saturation = max === 0 ? 0 : chroma / max;
+
+          // Strong subject anchors: printed text/logo, food colors, colored packages,
+          // pale blue packaging, black/dark copy, HACCP marks, etc.
+          if (isBlueProtected(r, g, b)) return true;
+          if (avg < 118) return true;
+          if (avg < 178 && chroma > 10) return true;
+          if (saturation > 0.075 && avg < 252) return true;
+          if (r > g + 10 && r > b + 12 && r > 95) return true;
+          if (g > r - 18 && g > b - 24 && g > 76 && saturation > 0.045) return true;
+          if (b > r + 6 && b > g - 10 && b > 130 && saturation > 0.045) return true;
+
+          return false;
+        }
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            const p = index * 4;
+            if (isStrongSubjectPixel(data[p], data[p + 1], data[p + 2], data[p + 3])) {
+              markSupport(index, x, y);
+            }
+          }
+        }
+
+        // If no reliable subject anchors exist, avoid over-protecting.
+        let supportCount = 0;
+        for (let i = 0; i < total; i++) {
+          if (support[i]) supportCount++;
+        }
+
+        if (supportCount < Math.max(24, total * 0.0006)) {
+          return protectedMask;
+        }
+
+        // 1) Direct dilation around strong subject pixels.
+        // This blocks the flood-fill from biting into labels and pale package edges.
+        const radius = Math.max(4, Math.round(Math.min(width, height) * 0.018));
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            if (!support[index]) continue;
+
+            const y0 = Math.max(0, y - radius);
+            const y1 = Math.min(height - 1, y + radius);
+            const x0 = Math.max(0, x - radius);
+            const x1 = Math.min(width - 1, x + radius);
+
+            for (let yy = y0; yy <= y1; yy++) {
+              const dy = yy - y;
+              for (let xx = x0; xx <= x1; xx++) {
+                const dx = xx - x;
+                if (dx * dx + dy * dy <= radius * radius) {
+                  protectedMask[yy * width + xx] = 1;
+                }
+              }
+            }
+          }
+        }
+
+        // Smooth row/column support bounds so small gaps in text/graphics do not break the package body.
+        const smoothRadius = Math.max(3, Math.round(Math.min(width, height) * 0.012));
+        const sRowMin = new Int32Array(height);
+        const sRowMax = new Int32Array(height);
+        const sColMin = new Int32Array(width);
+        const sColMax = new Int32Array(width);
+        sRowMin.fill(width);
+        sRowMax.fill(-1);
+        sColMin.fill(height);
+        sColMax.fill(-1);
+
+        for (let y = 0; y < height; y++) {
+          const y0 = Math.max(0, y - smoothRadius);
+          const y1 = Math.min(height - 1, y + smoothRadius);
+          for (let yy = y0; yy <= y1; yy++) {
+            if (rowMax[yy] >= 0) {
+              if (rowMin[yy] < sRowMin[y]) sRowMin[y] = rowMin[yy];
+              if (rowMax[yy] > sRowMax[y]) sRowMax[y] = rowMax[yy];
+            }
+          }
+        }
+
+        for (let x = 0; x < width; x++) {
+          const x0 = Math.max(0, x - smoothRadius);
+          const x1 = Math.min(width - 1, x + smoothRadius);
+          for (let xx = x0; xx <= x1; xx++) {
+            if (colMax[xx] >= 0) {
+              if (colMin[xx] < sColMin[x]) sColMin[x] = colMin[xx];
+              if (colMax[xx] > sColMax[x]) sColMax[x] = colMax[xx];
+            }
+          }
+        }
+
+        // 2) Enclosed white protection:
+        // A neutral/white pixel is protected only when it lies between subject anchors
+        // both horizontally and vertically. This keeps white labels/packages while still
+        // allowing the outside white background to be removed from the edges.
+        const enclosurePad = Math.max(4, Math.round(Math.min(width, height) * 0.015));
+        const minSpan = Math.max(18, Math.round(Math.min(width, height) * 0.06));
+
+        for (let y = 0; y < height; y++) {
+          const rMin = sRowMin[y];
+          const rMax = sRowMax[y];
+          if (rMax - rMin < minSpan) continue;
+
+          for (let x = Math.max(0, rMin - enclosurePad); x <= Math.min(width - 1, rMax + enclosurePad); x++) {
+            const cMin = sColMin[x];
+            const cMax = sColMax[x];
+            if (cMax - cMin < minSpan) continue;
+            if (y < cMin - enclosurePad || y > cMax + enclosurePad) continue;
+
+            const index = y * width + x;
+            const p = index * 4;
+            const a = data[p + 3];
+            if (a < 8) continue;
+
+            const r = data[p];
+            const g = data[p + 1];
+            const b = data[p + 2];
+            const avg = (r + g + b) / 3;
+            const chroma = getChroma(r, g, b);
+
+            // Protect enclosed whites, pale labels, light blue package areas, and soft print regions.
+            if (avg > 176 && chroma <= 46) {
+              protectedMask[index] = 1;
+            } else if (avg > 145 && chroma <= 70 && colorDistance(r, g, b, bg) > params.floodTolerance * 0.55) {
+              protectedMask[index] = 1;
+            }
+          }
+        }
+
+        // 3) Edge clamp:
+        // Do not protect neutral pixels that touch the outermost image border,
+        // otherwise plain white page backgrounds may remain.
+        for (let x = 0; x < width; x++) {
+          protectedMask[x] = 0;
+          protectedMask[(height - 1) * width + x] = 0;
+        }
+        for (let y = 0; y < height; y++) {
+          protectedMask[y * width] = 0;
+          protectedMask[y * width + width - 1] = 0;
+        }
+
+        return protectedMask;
+      }
 
       function isNeutralBrightBackground(index) {
         const p = index * 4;
@@ -2056,6 +2503,7 @@
         const a = data[p + 3];
 
         if (a < 8) return true;
+        if (subjectProtectMask[index]) return false;
         if (isBlueProtected(r, g, b)) return false;
 
         const avg = (r + g + b) / 3;
@@ -2128,6 +2576,7 @@
         const additions = [];
         for (let i = 0; i < total; i++) {
           if (bgMask[i]) continue;
+          if (subjectProtectMask[i]) continue;
 
           const p = i * 4;
           const r = data[p];
@@ -2158,6 +2607,7 @@
 
         if (a < 8) return 0;
         if (bgMask[index]) return 0;
+        if (subjectProtectMask[index]) return a;
         if (isBlueProtected(r, g, b)) return a;
 
         const avg = (r + g + b) / 3;
@@ -2473,6 +2923,203 @@
       }
     }
 
+    // ---- FFmpeg (video/gif engine) ----
+    async function loadFFmpeg() {
+      if (ffmpegInstance && ffmpegInstance.loaded) return ffmpegInstance;
+
+      setProgress("FFmpeg 엔진 불러오는 중 (최초 1회, 시간이 걸릴 수 있음)", 3);
+
+      const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/+esm");
+      const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm");
+
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on("progress", ({ progress }) => {
+        if (!ffmpegProgressContext) return;
+        const { index, total, label } = ffmpegProgressContext;
+        const safeProgress = Math.min(98, Math.max(2, Math.round((progress || 0) * 100)));
+        setProgress(label, overallPercent(index, total, safeProgress));
+      });
+
+      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm")
+      });
+
+      ffmpegInstance = ffmpeg;
+      return ffmpeg;
+    }
+
+    async function fileToUint8Array(file) {
+      return new Uint8Array(await file.arrayBuffer());
+    }
+
+    function guessMediaExt(file) {
+      const match = (file.name || "").match(/\.([a-z0-9]+)$/i);
+      if (match) return match[1].toLowerCase();
+      if (file.type === "video/mp4") return "mp4";
+      if (file.type === "video/webm") return "webm";
+      if (file.type === "video/quicktime") return "mov";
+      if (file.type === "image/gif") return "gif";
+      return "dat";
+    }
+
+    function buildScaleFilter(target) {
+      if (!target || target === "original") return null;
+      return `scale='if(gt(iw,ih),min(iw,${target}),-2)':'if(gt(iw,ih),-2,min(ih,${target}))'`;
+    }
+
+    async function safeDeleteFile(ffmpeg, name) {
+      try { await ffmpeg.deleteFile(name); } catch (error) { /* 이미 없거나 정리 실패는 무시 */ }
+    }
+
+    // ---- Video compress ----
+    function getVideoCompressOpts() {
+      return {
+        resolution: vcResolutionSelect.value,
+        mode: vcModeSelect.value,
+        targetSizeMB: Number(vcTargetSizeInput.value || 10),
+        crf: Number(vcCrfRange.value || 24),
+        removeAudio: vcRemoveAudio.checked
+      };
+    }
+
+    async function compressVideoFile(item, opts) {
+      const ffmpeg = await loadFFmpeg();
+      const inExt = guessMediaExt(item.file);
+      const inputName = `input.${inExt}`;
+      const outputName = "output.mp4";
+
+      await ffmpeg.writeFile(inputName, await fileToUint8Array(item.file));
+
+      const args = ["-i", inputName];
+      const scaleFilter = buildScaleFilter(opts.resolution);
+      if (scaleFilter) args.push("-vf", scaleFilter);
+
+      args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium");
+
+      if (opts.mode === "targetSize") {
+        const durationSec = Math.max(1, item.duration || 10);
+        const audioKbps = opts.removeAudio ? 0 : 128;
+        const bitrateKbps = Math.max(150, Math.floor((opts.targetSizeMB * 8192) / durationSec - audioKbps));
+        args.push("-b:v", `${bitrateKbps}k`, "-maxrate", `${Math.round(bitrateKbps * 1.2)}k`, "-bufsize", `${bitrateKbps * 2}k`);
+      } else {
+        args.push("-crf", String(opts.crf));
+      }
+
+      if (opts.removeAudio) {
+        args.push("-an");
+      } else {
+        args.push("-c:a", "aac", "-b:a", "128k");
+      }
+
+      args.push("-movflags", "+faststart", outputName);
+
+      await ffmpeg.exec(args);
+      const data = await ffmpeg.readFile(outputName);
+      const blob = new Blob([data], { type: "video/mp4" });
+
+      await safeDeleteFile(ffmpeg, inputName);
+      await safeDeleteFile(ffmpeg, outputName);
+
+      return blob;
+    }
+
+    // ---- GIF compress (iterative target size) ----
+    function getGifCompressOpts() {
+      return { targetSizeMB: Math.min(10, Number(gcTargetSizeInput.value || 10)) };
+    }
+
+    function buildPreFilter(fps, colors) {
+      const parts = [];
+      if (fps) parts.push(`fps=${fps}`);
+      return parts.join(",");
+    }
+
+    async function encodeGifPass(ffmpeg, inputName, pre, colors, extraArgsBefore) {
+      const paletteName = "palette.png";
+      const outputName = "pass_out.gif";
+      const before = extraArgsBefore || [];
+
+      const paletteFilter = pre ? `${pre},palettegen=max_colors=${colors}:stats_mode=diff` : `palettegen=max_colors=${colors}:stats_mode=diff`;
+      await ffmpeg.exec([...before, "-i", inputName, "-vf", paletteFilter, paletteName]);
+
+      const filterGraph = pre
+        ? `[0:v]${pre}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3`
+        : `[0:v][1:v]paletteuse=dither=bayer:bayer_scale=3`;
+      await ffmpeg.exec([...before, "-i", inputName, "-i", paletteName, "-filter_complex", filterGraph, "-loop", "0", outputName]);
+
+      const data = await ffmpeg.readFile(outputName);
+      const blob = new Blob([data], { type: "image/gif" });
+
+      await safeDeleteFile(ffmpeg, paletteName);
+      await safeDeleteFile(ffmpeg, outputName);
+
+      return blob;
+    }
+
+    async function compressGifFile(item, opts, onStepProgress) {
+      const ffmpeg = await loadFFmpeg();
+      const inputName = "input.gif";
+      await ffmpeg.writeFile(inputName, await fileToUint8Array(item.file));
+
+      const targetBytes = opts.targetSizeMB * 1024 * 1024;
+      const steps = [
+        { fps: null, colors: 256 },
+        { fps: 20, colors: 256 },
+        { fps: 15, colors: 200 },
+        { fps: 15, colors: 128 },
+        { fps: 12, colors: 96 },
+        { fps: 10, colors: 64 }
+      ];
+
+      let bestBlob = null;
+
+      for (let i = 0; i < steps.length; i++) {
+        onStepProgress?.(i + 1, steps.length);
+        const step = steps[i];
+        const pre = buildPreFilter(step.fps, step.colors);
+        const blob = await encodeGifPass(ffmpeg, inputName, pre, step.colors, null);
+        bestBlob = blob;
+        if (blob.size <= targetBytes) break;
+      }
+
+      await safeDeleteFile(ffmpeg, inputName);
+      return bestBlob;
+    }
+
+    // ---- Video segment to GIF ----
+    function getVideoToGifOpts() {
+      return {
+        start: Number(trimStartInput.value || 0),
+        end: Number(trimEndInput.value || 3),
+        resolution: vtgResolutionSelect.value,
+        fps: Number(vtgFpsSelect.value || 15),
+        colors: Number(vtgColorsRange.value || 128)
+      };
+    }
+
+    async function videoSegmentToGif(item, opts) {
+      const ffmpeg = await loadFFmpeg();
+      const inExt = guessMediaExt(item.file);
+      const inputName = `input.${inExt}`;
+      await ffmpeg.writeFile(inputName, await fileToUint8Array(item.file));
+
+      const start = Math.max(0, opts.start);
+      const durationSec = Math.max(0.1, opts.end - opts.start);
+      const scaleFilter = buildScaleFilter(opts.resolution);
+      const parts = [];
+      if (scaleFilter) parts.push(scaleFilter);
+      if (opts.fps) parts.push(`fps=${opts.fps}`);
+      const pre = parts.join(",");
+
+      const trimArgs = ["-ss", String(start), "-t", String(durationSec)];
+      const blob = await encodeGifPass(ffmpeg, inputName, pre, opts.colors, trimArgs);
+
+      await safeDeleteFile(ffmpeg, inputName);
+      return blob;
+    }
+
     // ---- Batch processing ----
     async function processQueue() {
       if (isProcessing) return;
@@ -2482,6 +3129,13 @@
         const selected = getSelectedItem();
         if (!selected) {
           setError("크롭할 이미지를 목록에서 먼저 선택하세요.");
+          return;
+        }
+        targets = [selected];
+      } else if (currentTool === "videoToGif") {
+        const selected = getSelectedItem();
+        if (!selected) {
+          setError("GIF로 만들 동영상을 목록에서 먼저 선택하세요.");
           return;
         }
         targets = [selected];
@@ -2550,10 +3204,30 @@
             setProgress(`${item.file.name} · 벡터화 중`, overallPercent(i, targets.length, 50));
             blob = await vectorizeImageFile(item.file, getVectorizeOpts());
             ext = "svg";
+          } else if (currentTool === "videoCompress") {
+            ffmpegProgressContext = { index: i, total: targets.length, label: `${item.file.name} · 동영상 압축 중` };
+            blob = await compressVideoFile(item, getVideoCompressOpts());
+            ext = "mp4";
+          } else if (currentTool === "gifCompress") {
+            blob = await compressGifFile(item, getGifCompressOpts(), (step, totalSteps) => {
+              setProgress(`${item.file.name} · 압축 시도 ${step}/${totalSteps}`, overallPercent(i, targets.length, (step / totalSteps) * 90));
+            });
+            ext = "gif";
+          } else if (currentTool === "videoToGif") {
+            ffmpegProgressContext = { index: i, total: targets.length, label: `${item.file.name} · GIF 생성 중` };
+            blob = await videoSegmentToGif(item, getVideoToGifOpts());
+            ext = "gif";
           }
 
+          ffmpegProgressContext = null;
+
           const url = URL.createObjectURL(blob);
-          const dims = ext === "svg" ? null : await loadDimsFromUrl(url);
+          let dims = null;
+          if (ext === "mp4" || ext === "webm") {
+            dims = await loadMediaInfo(url, "video");
+          } else if (ext !== "svg") {
+            dims = await loadMediaInfo(url, "image");
+          }
 
           item.resultBlob = blob;
           item.resultUrl = url;
@@ -2565,6 +3239,7 @@
           console.error(error);
           item.status = "error";
           failCount++;
+          ffmpegProgressContext = null;
         }
 
         renderQueue();
@@ -2592,24 +3267,43 @@
 
     function switchTool(tool) {
       if (tool === currentTool || isProcessing) return;
+
+      const prevCategory = CATEGORY_BY_TOOL[currentTool];
+      const nextCategory = CATEGORY_BY_TOOL[tool];
       currentTool = tool;
 
       toolNavBtns.forEach((btn) => btn.classList.toggle("active", btn.dataset.tool === tool));
       toolOptionPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `opts${capitalizeTool(tool)}`));
 
       startBtn.textContent = TOOL_META[tool].runLabel;
+      fileInput.setAttribute("accept", ACCEPT_BY_CATEGORY[nextCategory]);
+      if (dropzoneHint) dropzoneHint.textContent = HINT_BY_CATEGORY[nextCategory];
 
-      for (const item of queueItems) {
-        if (item.resultUrl) URL.revokeObjectURL(item.resultUrl);
-        item.resultUrl = null;
-        item.resultBlob = null;
-        item.resultDims = null;
-        item.resultExt = null;
-        item.resultSuffix = null;
-        item.status = "pending";
+      let clearedCount = 0;
+      if (prevCategory !== nextCategory) {
+        clearedCount = queueItems.length;
+        for (const item of queueItems) revokeItemUrls(item);
+        queueItems = [];
+        selectedItemId = null;
+      } else {
+        for (const item of queueItems) {
+          if (item.resultUrl) URL.revokeObjectURL(item.resultUrl);
+          item.resultUrl = null;
+          item.resultBlob = null;
+          item.resultDims = null;
+          item.resultExt = null;
+          item.resultSuffix = null;
+          item.status = "pending";
+        }
       }
 
-      setError("");
+      if (tool === "videoToGif") {
+        trimRange = { start: 0, end: 3 };
+        trimStartInput.value = 0;
+        trimEndInput.value = 3;
+      }
+
+      setError(clearedCount ? `파일 형식이 다른 도구로 전환되어 업로드된 ${clearedCount}개 파일 목록을 초기화했습니다.` : "");
       clearProgress();
       setState("대기 중");
       renderQueue();
@@ -2687,11 +3381,20 @@
       try {
         const pathname = new URL(url).pathname;
         const last = pathname.split("/").filter(Boolean).pop();
-        if (last && /\.(png|jpe?g|webp)$/i.test(last)) return last;
+        if (last && /\.(png|jpe?g|webp|gif|mp4|webm|mov|avi|mkv)$/i.test(last)) return last;
       } catch (error) {
         // URL 파싱 실패 시 기본 이름 사용
       }
-      const ext = contentType && contentType.includes("png") ? "png" : contentType && contentType.includes("webp") ? "webp" : "jpg";
+
+      if (contentType && contentType.startsWith("video/")) {
+        const ext = contentType.includes("webm") ? "webm" : contentType.includes("quicktime") ? "mov" : "mp4";
+        return `url-video-${Date.now()}.${ext}`;
+      }
+
+      const ext = contentType && contentType.includes("gif") ? "gif"
+        : contentType && contentType.includes("png") ? "png"
+        : contentType && contentType.includes("webp") ? "webp"
+        : "jpg";
       return `url-image-${Date.now()}.${ext}`;
     }
 
@@ -2708,8 +3411,8 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const blob = await response.blob();
-        if (!blob.type.startsWith("image/")) {
-          throw new Error("이미지 형식이 아닙니다.");
+        if (!blob.type.startsWith("image/") && !blob.type.startsWith("video/")) {
+          throw new Error("이미지/동영상 형식이 아닙니다.");
         }
 
         const name = guessFileNameFromUrl(url, blob.type);
@@ -2718,7 +3421,7 @@
         urlInput.value = "";
       } catch (error) {
         console.error(error);
-        setError("이미지 URL을 불러오지 못했습니다. CORS 정책으로 접근이 차단되었거나 잘못된 주소일 수 있습니다. 이미지를 저장한 뒤 업로드해주세요.");
+        setError("URL을 불러오지 못했습니다. CORS 정책으로 접근이 차단되었거나 잘못된 주소, 혹은 현재 도구가 지원하지 않는 형식일 수 있습니다. 파일을 저장한 뒤 업로드해주세요.");
       } finally {
         urlFetchBtn.disabled = false;
         urlFetchBtn.textContent = "가져오기";
@@ -2760,6 +3463,50 @@
 
     vectorizeColorsRange.addEventListener("input", () => {
       vectorizeColorsValue.textContent = vectorizeColorsRange.value;
+    });
+
+    vcModeSelect.addEventListener("change", () => {
+      const isTargetSize = vcModeSelect.value === "targetSize";
+      vcTargetSizeRow.style.display = isTargetSize ? "block" : "none";
+      vcCrfRow.style.display = isTargetSize ? "none" : "block";
+    });
+
+    vcCrfRange.addEventListener("input", () => {
+      vcCrfValue.textContent = vcCrfRange.value;
+    });
+
+    gcTargetSizeInput.addEventListener("change", () => {
+      const value = Math.min(10, Math.max(1, Number(gcTargetSizeInput.value || 10)));
+      gcTargetSizeInput.value = value;
+    });
+
+    vtgColorsRange.addEventListener("input", () => {
+      vtgColorsValue.textContent = vtgColorsRange.value;
+    });
+
+    function getPreviewVideoEl() {
+      return originalCanvas.querySelector("video");
+    }
+
+    trimSetStartBtn.addEventListener("click", () => {
+      const video = getPreviewVideoEl();
+      if (!video) {
+        setError("먼저 목록에서 동영상을 선택하세요.");
+        return;
+      }
+      trimStartInput.value = video.currentTime.toFixed(1);
+      if (Number(trimEndInput.value) <= Number(trimStartInput.value)) {
+        trimEndInput.value = (Number(trimStartInput.value) + 1).toFixed(1);
+      }
+    });
+
+    trimSetEndBtn.addEventListener("click", () => {
+      const video = getPreviewVideoEl();
+      if (!video) {
+        setError("먼저 목록에서 동영상을 선택하세요.");
+        return;
+      }
+      trimEndInput.value = video.currentTime.toFixed(1);
     });
 
     fileInput.addEventListener("change", (event) => {
