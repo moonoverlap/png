@@ -1,8 +1,5 @@
 {
-  "name": "image-toolkit-v78-corner-hole-repair",
-  "version": "7.8.0",
-  "private": true,
-  "scripts": {
-    "start": "node server.js"
-  }
+  "name": "image-toolkit-v80-tested-envelope-lock",
+  "version": "8.0.0",
+  "private": true
 }

@@ -27,3 +27,18 @@ http://localhost:5173
 - 기존 닫힌 구멍 보정뿐 아니라 외부와 연결된 열린 모서리 결손까지 상품 내부 윤곽 기준으로 보호
 - 컬러 인쇄/로고/텍스트/식품 사진/AI 전경을 기준점으로 상품 패키지 보호 마스크 생성
 - ZIP 파일이 저장소에 올라가지 않도록 `.gitignore`에 `*.zip` 유지
+
+
+## v7.9 업데이트
+
+- 연한 베이지/아이보리 포장지 상단이 투명하게 뚫리는 문제 수정
+- `buildPalePackageSurfaceProtectMask()`로 밝은 패키지 표면 보호
+- 일품 도톰육포 45g 같은 밝은 포장 상품 기준 보정
+
+
+## v80-tested-envelope-lock
+
+- 실제 상품 패키지 7종 테스트 기준으로 내부 구멍 방지 로직 추가
+- `buildTestedProductEnvelopeProtectMask()` 추가
+- 흰/아이보리/반투명 포장 표면과 라벨을 상품 외곽 안에서 통째로 보호
+- ZIP 업로드 방지를 위해 `.gitignore`에 `*.zip` 유지
