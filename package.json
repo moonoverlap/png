@@ -1,6 +1,6 @@
 {
-  "name": "png-background-studio-v44-remover-studio",
-  "version": "4.4.0",
+  "name": "image-toolkit-v78-corner-hole-repair",
+  "version": "7.8.0",
   "private": true,
   "scripts": {
     "start": "node server.js"
