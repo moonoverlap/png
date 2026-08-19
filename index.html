@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v8.8 natural AI-only routing: food/dish photos bypass package protection -->
   <!-- v8.7 natural food/photo AI-first mode: bypass package locks for dish/plate photos -->
   <!-- v8.6 no artificial outline: protect subject without drawing rectangular/stroke envelopes -->
   <!-- v8.5 soft-pack AI-first: transparent/vacuum/irregular packages bypass broad box/envelope protection -->
@@ -2294,8 +2295,8 @@
       // v7.8: 흰 포장지 모서리가 바깥 배경과 연결되어 "열린 구멍"처럼 뚫리는 현상을 보정합니다.
       // 닫힌 구멍(fillEnclosedHoles)만으로는 복구되지 않는 상단/측면 모서리 결손을
       // 상품 패키지 내부 윤곽(envelope) 기준으로 먼저 보호합니다.
-      if (looksLikeNonWhiteSceneBackground(data, width, height)) {
-        // v8.7: 회색/베이지 테이블 배경 사진은 색상 flood-fill 방식으로는 누끼가 불가능합니다.
+      if (looksLikeNonWhiteSceneBackground(data, width, height) || looksLikeNaturalFoodPhotoWithoutAi(data, width, height)) {
+        // v8.8: 회색/베이지 테이블 배경과 자연식품/접시 사진은 색상 flood-fill 방식으로는 누끼가 불가능합니다.
         // 빠른 모드를 선택해도 AI 피사체 인식으로 자동 전환합니다.
         return runAiForegroundMode(originalFile, null);
       }
@@ -4150,6 +4151,166 @@
     }
 
 
+
+    // v8.8: 자연식품/접시 사진은 패키지 보호 로직을 통과시키지 않습니다.
+    // 명란, 접시 음식, 클로즈업 식품처럼 포장 인쇄가 없고 음식 색/접시 신호가 강한 사진은
+    // 흰 배경이어도 AI 원본 마스크를 우선 사용해야 합니다.
+    function looksLikeNaturalFoodPhotoWithoutAi(data, width, height) {
+      const total = width * height;
+      if (!data || total < 4096) return false;
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 420));
+      const border = Math.max(3, Math.round(Math.min(width, height) * 0.05));
+      let innerCount = 0;
+      let borderCount = 0;
+      let innerWarmFood = 0;
+      let innerGreenFood = 0;
+      let innerNeutralDish = 0;
+      let innerDarkPrint = 0;
+      let innerBrandBlue = 0;
+      let borderWhite = 0;
+      let borderLowChroma = 0;
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      for (let y = 0; y < height; y += step) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x += step) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          if (data[p + 3] < 8) continue;
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const edge = edgeScore(i, x, y, brightness);
+          const isBorder = x < border || x >= width - border || y < border || y >= height - border;
+
+          if (isBorder) {
+            borderCount++;
+            if (brightness >= 245 && chroma <= 18) borderWhite++;
+            if (brightness >= 120 && brightness <= 245 && chroma <= 34) borderLowChroma++;
+          } else {
+            innerCount++;
+            const warmFood = r >= 128 && g >= 55 && g <= 210 && b <= 195 && r > b + 8;
+            const greenFood = g >= 90 && g > r + 14 && g > b + 8;
+            const neutralDish = brightness >= 150 && brightness <= 246 && chroma <= 45 && edge >= 4;
+            const darkPrint = brightness <= 90 && edge >= 42;
+            const brandBlue = b >= 125 && r <= 135 && b > r + 35 && b > g + 8;
+            if (warmFood) innerWarmFood++;
+            if (greenFood) innerGreenFood++;
+            if (neutralDish) innerNeutralDish++;
+            if (darkPrint) innerDarkPrint++;
+            if (brandBlue) innerBrandBlue++;
+          }
+        }
+      }
+
+      const warmRatio = innerWarmFood / Math.max(1, innerCount);
+      const greenRatio = innerGreenFood / Math.max(1, innerCount);
+      const dishRatio = innerNeutralDish / Math.max(1, innerCount);
+      const darkPrintRatio = innerDarkPrint / Math.max(1, innerCount);
+      const brandBlueRatio = innerBrandBlue / Math.max(1, innerCount);
+      const borderWhiteRatio = borderWhite / Math.max(1, borderCount);
+      const borderSceneRatio = borderLowChroma / Math.max(1, borderCount);
+
+      const foodOrDish = warmRatio >= 0.14 || greenRatio >= 0.08 || (warmRatio >= 0.08 && dishRatio >= 0.10);
+      const notPrintedCatalog = darkPrintRatio < 0.030 && brandBlueRatio < 0.025;
+      const simplePhotoBackground = borderWhiteRatio >= 0.12 || borderSceneRatio >= 0.22;
+      return foodOrDish && notPrintedCatalog && simplePhotoBackground;
+    }
+
+    function looksLikeNaturalFoodOrDishPhotoBroad(data, width, height, aiAlphaArr, catalogBox) {
+      const total = width * height;
+      if (!data || !aiAlphaArr || total < 4096) return false;
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 420));
+      let aiCount = 0;
+      let warmFood = 0;
+      let greenFood = 0;
+      let neutralDish = 0;
+      let darkPrint = 0;
+      let brandBlue = 0;
+      let aiMinX = width, aiMinY = height, aiMaxX = -1, aiMaxY = -1;
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      for (let y = 0; y < height; y += step) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x += step) {
+          const i = rowOffset + x;
+          if (aiAlphaArr[i] < 32) continue;
+          const p = i * 4;
+          if (data[p + 3] < 8) continue;
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const edge = edgeScore(i, x, y, brightness);
+          aiCount++;
+          if (x < aiMinX) aiMinX = x;
+          if (x > aiMaxX) aiMaxX = x;
+          if (y < aiMinY) aiMinY = y;
+          if (y > aiMaxY) aiMaxY = y;
+          if (r >= 128 && g >= 55 && g <= 210 && b <= 195 && r > b + 8) warmFood++;
+          if (g >= 90 && g > r + 14 && g > b + 8) greenFood++;
+          if (brightness >= 145 && brightness <= 246 && chroma <= 48 && edge >= 4) neutralDish++;
+          if (brightness <= 90 && edge >= 42) darkPrint++;
+          if (b >= 125 && r <= 135 && b > r + 35 && b > g + 8) brandBlue++;
+        }
+      }
+
+      const sampledTotal = Math.ceil(height / step) * Math.ceil(width / step);
+      const aiRatio = aiCount / Math.max(1, sampledTotal);
+      const aiW = aiMaxX >= aiMinX ? (aiMaxX - aiMinX + 1) : 0;
+      const aiH = aiMaxY >= aiMinY ? (aiMaxY - aiMinY + 1) : 0;
+      const aiBoxRatio = (aiW * aiH) / Math.max(1, total);
+      const foodRatio = warmFood / Math.max(1, aiCount);
+      const greenRatio = greenFood / Math.max(1, aiCount);
+      const dishRatio = neutralDish / Math.max(1, aiCount);
+      const darkPrintRatio = darkPrint / Math.max(1, aiCount);
+      const brandBlueRatio = brandBlue / Math.max(1, aiCount);
+
+      const foodOrDish = foodRatio >= 0.10 || greenRatio >= 0.08 || (foodRatio >= 0.06 && dishRatio >= 0.10);
+      const compactAiSubject = aiRatio >= 0.05 && aiRatio <= 0.88 && aiBoxRatio >= 0.08 && aiBoxRatio <= 0.96;
+      const notPrintedPackage = darkPrintRatio < 0.040 && brandBlueRatio < 0.035;
+      return compactAiSubject && foodOrDish && notPrintedPackage;
+    }
+
+    // v8.8: 자연식품 사진은 AI 원본 알파를 최대한 그대로 사용합니다.
+    // 색상 flood-fill/패키지 보호/사각 envelope 보정은 배경을 살리거나 외곽선을 만들기 때문에 제외합니다.
+    function refineNaturalPhotoAiOnlyAlpha(data, width, height, aiAlphaArr) {
+      const total = width * height;
+      const finalAlpha = new Uint8Array(total);
+      for (let i = 0; i < total; i++) {
+        const a = aiAlphaArr[i];
+        if (a <= 8) finalAlpha[i] = 0;
+        else if (a >= 220) finalAlpha[i] = 255;
+        else finalAlpha[i] = a;
+      }
+      removeSmallAlphaIslands(finalAlpha, width, height, Math.max(12, Math.round(total * 0.00025)));
+      fillEnclosedHoles(finalAlpha, width, height);
+      return finalAlpha;
+    }
+
     // v8.7: 일반 푸드/접시 사진 판정.
     // 패키지 상품처럼 흰 포장지를 보호하려고 colorAlpha와 박스/봉투 보호 마스크를 합치면,
     // 회색 테이블·종이 배경 같은 실제 배경까지 피사체로 살아납니다.
@@ -4378,14 +4539,14 @@
 
       const catalogBox = getCatalogPackageBounds(originalData.data, width, height);
       const softTransparentPackage = looksLikeSoftTransparentPackage(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox);
-      const naturalFoodOrDishPhoto = looksLikeNaturalFoodOrDishPhoto(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox);
+      const naturalFoodOrDishPhoto = looksLikeNaturalFoodOrDishPhoto(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox) || looksLikeNaturalFoodOrDishPhotoBroad(originalData.data, width, height, aiAlphaArr, catalogBox);
 
       let finalAlpha;
       if (naturalFoodOrDishPhoto) {
-        // v8.7: 명란/접시 사진처럼 회색 테이블 배경이 있는 일반 푸드 사진은
+        // v8.8: 명란/접시/클로즈업 식품처럼 일반 푸드 사진은
         // 패키지 보호 마스크와 colorAlpha 합집합을 쓰면 배경까지 살아납니다.
         // 이 유형은 AI 마스크만 정리해서 사용합니다.
-        finalAlpha = refineNaturalPhotoForegroundAlpha(originalData.data, width, height, aiAlphaArr);
+        finalAlpha = refineNaturalPhotoAiOnlyAlpha(originalData.data, width, height, aiAlphaArr);
       } else if (softTransparentPackage) {
         // v8.5: 크래미 1kg/대파 진공팩 같은 투명 비닐형 상품.
         // 넓은 보호마스크와 박스 잠금은 흰 배경 카드를 남기므로 금지합니다.
