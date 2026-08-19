@@ -1,9 +1,11 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v8.3 catalog package box lock: final product bounding-box alpha lock removes outer white card and fills internal holes -->
+  <!-- v8.2 structural envelope trim: removes closed outer white card residues after package protection -->
   <!-- v8.1 outer white trim: tested on 7 catalog package images, locks full product surface to prevent transparent holes -->
   <!-- v7.9 pale package surface lock: preserves very light beige/white package paper areas -->
-  <meta name="app-version" content="v80-tested-envelope-lock">
+  <meta name="app-version" content="v83-catalog-package-box-lock">
   <!-- v7.8 corner hole repair: open-corner notch fill + product package envelope protect -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
@@ -1027,17 +1029,17 @@
 
           <div class="form-row crop-row">
             <label class="checkbox-label" for="cropToggle">
-              <input type="checkbox" id="cropToggle" />
+              <input type="checkbox" id="cropToggle" checked />
               <span>배경 제거 후 자동 크롭 (선택)</span>
             </label>
-            <select id="paddingSelect" disabled>
+            <select id="paddingSelect">
               <option value="0" selected>여백 없이 딱 맞게</option>
               <option value="0.03">여백 조금 (약 3%)</option>
               <option value="0.08">여백 넉넉히 (약 8%)</option>
             </select>
           </div>
 
-          <p class="notice">"AI 피사체 인식"은 AI 윤곽 인식과 색상 연결성 판정을 함께 적용해, 흰 배경 위 흰 글자·로고나 패키지 하단 흰 영역까지 온전히 보존합니다. 결과에서 일부가 잘려나가면 감도를 "낮음"으로, 배경이 덜 지워지면 "높음"으로 조절하세요. 자동 크롭은 배경 제거가 끝난 뒤 투명 영역을 기준으로 여백을 잘라냅니다.</p>
+          <p class="notice">"AI 피사체 인식"은 AI 윤곽 인식, 색상 연결성, 상품 패키지 박스 잠금을 함께 적용합니다. 흰 배경 위 흰 포장지/아이보리 라벨은 보존하고, 상품 박스 밖의 흰 배경은 제거합니다. 상품 패키지 이미지는 기본적으로 Photoroom처럼 자동 크롭됩니다.</p>
         </div>
 
         <div id="optsResize" class="tool-options">
@@ -2297,6 +2299,10 @@
       // v8.1: 보호 마스크가 바깥 흰 여백까지 끌고 들어온 경우,
       // 이미지 가장자리와 연결된 순백/저채도 배경 잔여물을 마지막에 다시 제거합니다.
       trimOuterWhiteBackgroundResidue(colorAlpha, data, width, height);
+      // v8.2: 외곽 배경이 '닫힌 흰 카드'처럼 남는 경우, 상품 구조 윤곽 밖은 마지막에 제거합니다.
+      trimOutsideStructuralProductEnvelope(colorAlpha, data, width, height, null);
+      // v8.3: 카탈로그 상품은 최종 상품 박스 기준으로 내부를 완전히 잠그고 바깥 흰 배경을 제거합니다.
+      applyCatalogPackageBoxLock(colorAlpha, data, width, height);
       const total = width * height;
 
       for (let i = 0; i < total; i++) {
@@ -3239,6 +3245,405 @@
       return alphaArr;
     }
 
+
+    // v8.2: 구조 윤곽 기반 외곽 트림.
+    // v8.1의 edge-connected white trim은 이미지 가장자리와 연결된 흰색만 지울 수 있었습니다.
+    // 하지만 보호 마스크가 넓게 잡히면 상품 주변 흰 배경이 '닫힌 흰 카드'처럼 남아 더 이상 가장자리와
+    // 연결되지 않습니다. 이 함수는 로고/글자/컬러 인쇄/식품 사진/패키지 경계선/AI 마스크를 근거로
+    // 실제 상품 패키지 구조 컴포넌트를 찾고, 그 행 단위 외곽 밖의 픽셀은 모두 투명 처리합니다.
+    function trimOutsideStructuralProductEnvelope(alphaArr, data, width, height, aiAlphaArr) {
+      const total = width * height;
+      if (!alphaArr || !data || width < 32 || height < 32) return alphaArr;
+
+      const bg = estimateBackgroundColor(data, width, height);
+      const signal = new Uint8Array(total);
+
+      function brightnessAt(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+
+      function localEdgeScore(x, y, brightness) {
+        const i = y * width + x;
+        const lx = x > 0 ? brightnessAt(i - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAt(i + 1) : brightness;
+        const ty = y > 0 ? brightnessAt(i - width) : brightness;
+        const by = y < height - 1 ? brightnessAt(i + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      for (let y = 1; y < height - 1; y++) {
+        const rowOffset = y * width;
+        for (let x = 1; x < width - 1; x++) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          const a = data[p + 3];
+          if (a < 8) continue;
+
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const dist = colorDistance(r, g, b, bg);
+          const edge = localEdgeScore(x, y, brightness);
+          const aiHit = aiAlphaArr ? aiAlphaArr[i] >= 28 : false;
+
+          // 순백 배경은 제외합니다. 베이지/아이보리 포장지, 얇은 그림자, 인쇄물, 식품 사진은 신호로 봅니다.
+          const pureOuterWhite = brightness >= 253 && chroma <= 6 && dist <= 8 && edge <= 12 && !aiHit;
+          if (pureOuterWhite) continue;
+
+          const packageSurface = brightness <= 251 && dist >= 5;
+          const paleTexture = brightness <= 252 && edge >= 10 && dist >= 3;
+          const printedOrFood = chroma >= 7 || brightness <= 248 || dist >= 10;
+          const structuralEdge = edge >= 16;
+
+          if (aiHit || packageSurface || paleTexture || printedOrFood || structuralEdge) {
+            signal[i] = 1;
+          }
+        }
+      }
+
+      // 작은 끊김을 이어 실제 상품 구조를 하나의 컴포넌트로 묶습니다.
+      let structure = morphBinary(signal, width, height, 2, "dilate");
+      structure = morphBinary(structure, width, height, 1, "erode");
+
+      const componentId = new Int32Array(total);
+      const queue = new Int32Array(total);
+      let bestId = 0;
+      let bestScore = 0;
+      let compId = 0;
+
+      for (let start = 0; start < total; start++) {
+        if (!structure[start] || componentId[start]) continue;
+        compId++;
+        let head = 0;
+        let tail = 0;
+        queue[tail++] = start;
+        componentId[start] = compId;
+        let area = 0;
+        let minX = width, minY = height, maxX = -1, maxY = -1;
+
+        while (head < tail) {
+          const i = queue[head++];
+          area++;
+          const x = i % width;
+          const y = Math.floor(i / width);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+
+          const neighbors = [];
+          if (x > 0) neighbors.push(i - 1);
+          if (x < width - 1) neighbors.push(i + 1);
+          if (y > 0) neighbors.push(i - width);
+          if (y < height - 1) neighbors.push(i + width);
+          for (const ni of neighbors) {
+            if (structure[ni] && !componentId[ni]) {
+              componentId[ni] = compId;
+              queue[tail++] = ni;
+            }
+          }
+        }
+
+        const bboxW = maxX - minX + 1;
+        const bboxH = maxY - minY + 1;
+        if (area < total * 0.015 || bboxW < width * 0.12 || bboxH < height * 0.12) continue;
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const dx = Math.abs(centerX - width / 2) / width;
+        const dy = Math.abs(centerY - height / 2) / height;
+        const centerBonus = Math.max(0.35, 1 - dx * 1.4 - dy * 0.9);
+        const sizeBonus = Math.min(1.6, (bboxW * bboxH) / Math.max(1, total * 0.22));
+        const score = area * centerBonus * sizeBonus;
+        if (score > bestScore) {
+          bestScore = score;
+          bestId = compId;
+        }
+      }
+
+      if (!bestId) return alphaArr;
+
+      const rowLeft = new Int32Array(height);
+      const rowRight = new Int32Array(height);
+      const rowCount = new Int32Array(height);
+      for (let y = 0; y < height; y++) { rowLeft[y] = width; rowRight[y] = -1; }
+
+      let minY = height;
+      let maxY = -1;
+      for (let i = 0; i < total; i++) {
+        if (componentId[i] !== bestId) continue;
+        const x = i % width;
+        const y = Math.floor(i / width);
+        if (x < rowLeft[y]) rowLeft[y] = x;
+        if (x > rowRight[y]) rowRight[y] = x;
+        rowCount[y]++;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+
+      const validRows = [];
+      const minSpan = Math.max(10, Math.round(width * 0.035));
+      const minCount = Math.max(3, Math.round(width * 0.004));
+      for (let y = minY; y <= maxY; y++) {
+        const span = rowRight[y] - rowLeft[y] + 1;
+        if (rowCount[y] >= minCount && span >= minSpan) validRows.push(y);
+      }
+      if (validRows.length < 8) return alphaArr;
+
+      function nearestValidRow(y, direction) {
+        if (direction < 0) {
+          for (let k = validRows.length - 1; k >= 0; k--) if (validRows[k] <= y) return validRows[k];
+        } else {
+          for (let k = 0; k < validRows.length; k++) if (validRows[k] >= y) return validRows[k];
+        }
+        return -1;
+      }
+
+      const envelopeLeft = new Int32Array(height);
+      const envelopeRight = new Int32Array(height);
+      for (let y = 0; y < height; y++) { envelopeLeft[y] = width; envelopeRight[y] = -1; }
+      const padX = Math.max(2, Math.round(width * 0.006));
+      const padY = Math.max(1, Math.round(height * 0.004));
+      const y0 = Math.max(0, validRows[0] - padY);
+      const y1 = Math.min(height - 1, validRows[validRows.length - 1] + padY);
+
+      for (let y = y0; y <= y1; y++) {
+        const up = nearestValidRow(y, -1);
+        const down = nearestValidRow(y, 1);
+        if (up < 0 && down < 0) continue;
+        let left, right;
+        if (up < 0) {
+          left = rowLeft[down];
+          right = rowRight[down];
+        } else if (down < 0) {
+          left = rowLeft[up];
+          right = rowRight[up];
+        } else if (up === down) {
+          left = rowLeft[up];
+          right = rowRight[up];
+        } else {
+          const t = (y - up) / Math.max(1, down - up);
+          left = Math.round(rowLeft[up] * (1 - t) + rowLeft[down] * t);
+          right = Math.round(rowRight[up] * (1 - t) + rowRight[down] * t);
+        }
+        envelopeLeft[y] = Math.max(0, left - padX);
+        envelopeRight[y] = Math.min(width - 1, right + padX);
+      }
+
+      // 윤곽 경계가 1~2px 흔들리는 것을 완화합니다.
+      for (let pass = 0; pass < 2; pass++) {
+        const nextLeft = new Int32Array(envelopeLeft);
+        const nextRight = new Int32Array(envelopeRight);
+        for (let y = y0 + 1; y <= y1 - 1; y++) {
+          if (envelopeRight[y] < envelopeLeft[y]) continue;
+          const l0 = envelopeLeft[y - 1], l1 = envelopeLeft[y], l2 = envelopeLeft[y + 1];
+          const r0 = envelopeRight[y - 1], r1 = envelopeRight[y], r2 = envelopeRight[y + 1];
+          if (r0 >= l0 && r2 >= l2) {
+            nextLeft[y] = Math.max(0, Math.min(l0, l1, l2));
+            nextRight[y] = Math.min(width - 1, Math.max(r0, r1, r2));
+          }
+        }
+        envelopeLeft.set(nextLeft);
+        envelopeRight.set(nextRight);
+      }
+
+      let kept = 0;
+      for (let y = 0; y < height; y++) {
+        const left = envelopeLeft[y];
+        const right = envelopeRight[y];
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x;
+          if (right >= left && x >= left && x <= right) {
+            kept++;
+          } else {
+            alphaArr[i] = 0;
+          }
+        }
+      }
+
+      // 비정상적으로 너무 작거나 거의 전체 이미지인 경우는 안전하게 되돌립니다.
+      const keepRatio = kept / total;
+      if (keepRatio < 0.05 || keepRatio > 0.93) return alphaArr;
+      return alphaArr;
+    }
+
+    // v8.3: 카탈로그 상품 패키지 박스 잠금.
+    // 지금까지의 구멍 문제는 보호 마스크를 넓히면 내부는 살아나지만 바깥 흰 배경까지 같이 살아나는 구조였습니다.
+    // 이 함수는 카탈로그형 상품 사진(흰 배경 + 패키지/박스가 중앙에 있는 이미지)을 별도로 감지한 뒤,
+    // 원본에서 상품이 실제로 시작/끝나는 박스 경계를 계산합니다.
+    // 최종 단계에서 그 박스 안은 모두 피사체로 고정하고, 박스 밖은 모두 투명 처리합니다.
+    // 그래서 흰 포장지/베이지 라벨/비닐은 날아가지 않고, 바깥 흰 카드 배경은 남지 않습니다.
+    function getCatalogPackageBounds(data, width, height) {
+      const total = width * height;
+      if (!data || width < 64 || height < 64) return null;
+
+      // 이미 투명 배경을 가진 PNG는 다시 박스 잠금을 걸지 않습니다.
+      let borderTransparent = 0;
+      let borderCount = 0;
+      const borderStep = Math.max(1, Math.floor(Math.min(width, height) / 120));
+      for (let x = 0; x < width; x += borderStep) {
+        let i1 = x * 4;
+        let i2 = ((height - 1) * width + x) * 4;
+        if (data[i1 + 3] < 8) borderTransparent++;
+        if (data[i2 + 3] < 8) borderTransparent++;
+        borderCount += 2;
+      }
+      for (let y = 0; y < height; y += borderStep) {
+        let i1 = (y * width) * 4;
+        let i2 = (y * width + width - 1) * 4;
+        if (data[i1 + 3] < 8) borderTransparent++;
+        if (data[i2 + 3] < 8) borderTransparent++;
+        borderCount += 2;
+      }
+      if (borderCount && borderTransparent / borderCount > 0.18) return null;
+
+      const bg = estimateBackgroundColor(data, width, height);
+      let borderWhiteCount = 0;
+      let borderOpaqueCount = 0;
+      function borderIsWhite(index) {
+        const p = index * 4;
+        if (data[p + 3] < 8) return false;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const chroma = maxC - minC;
+        const brightness = (r + g + b) / 3;
+        const dist = colorDistance(r, g, b, bg);
+        return brightness >= 245 && chroma <= 16 && dist <= 26;
+      }
+      for (let x = 0; x < width; x += borderStep) {
+        borderOpaqueCount += 2;
+        if (borderIsWhite(x)) borderWhiteCount++;
+        if (borderIsWhite((height - 1) * width + x)) borderWhiteCount++;
+      }
+      for (let y = 0; y < height; y += borderStep) {
+        borderOpaqueCount += 2;
+        if (borderIsWhite(y * width)) borderWhiteCount++;
+        if (borderIsWhite(y * width + width - 1)) borderWhiteCount++;
+      }
+      // 바깥 배경이 흰색/회색 계열인 카탈로그 이미지에만 적용합니다.
+      if (borderOpaqueCount && borderWhiteCount / borderOpaqueCount < 0.65) return null;
+
+      const rowCount = new Int32Array(height);
+      const colCount = new Int32Array(width);
+      let evidenceCount = 0;
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(x, y, brightness) {
+        const i = y * width + x;
+        const lx = x > 0 ? brightnessAtIndex(i - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(i + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(i - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(i + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      for (let y = 0; y < height; y++) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x++) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          if (data[p + 3] < 8) continue;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const dist = colorDistance(r, g, b, bg);
+          const edge = edgeScore(x, y, brightness);
+
+          // 순백 배경은 신호에서 제외합니다. 단, 연한 패키지 종이/비닐/인쇄 경계는 신호로 잡습니다.
+          const pureCanvasWhite = brightness >= 252 && chroma <= 5 && dist <= 8 && edge <= 8;
+          const packageSignal = !pureCanvasWhite && (
+            brightness < 250 ||
+            dist > 6 ||
+            chroma > 7 ||
+            edge > 14
+          );
+          if (!packageSignal) continue;
+
+          rowCount[y]++;
+          colCount[x]++;
+          evidenceCount++;
+        }
+      }
+
+      if (evidenceCount < Math.max(80, total * 0.006)) return null;
+
+      const minRowCount = Math.max(2, Math.round(width * 0.003));
+      const minColCount = Math.max(2, Math.round(height * 0.003));
+      let minY = height;
+      let maxY = -1;
+      let minX = width;
+      let maxX = -1;
+
+      for (let y = 0; y < height; y++) {
+        if (rowCount[y] >= minRowCount) {
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+      for (let x = 0; x < width; x++) {
+        if (colCount[x] >= minColCount) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+
+      if (maxX <= minX || maxY <= minY) return null;
+
+      const pad = Math.max(0, Math.round(Math.min(width, height) * 0.002));
+      minX = Math.max(0, minX - pad);
+      minY = Math.max(0, minY - pad);
+      maxX = Math.min(width - 1, maxX + pad);
+      maxY = Math.min(height - 1, maxY + pad);
+
+      const boxW = maxX - minX + 1;
+      const boxH = maxY - minY + 1;
+      const boxArea = boxW * boxH;
+      const boxRatio = boxArea / total;
+      if (boxRatio < 0.08 || boxRatio > 0.92) return null;
+      if (boxW < width * 0.18 || boxH < height * 0.18) return null;
+
+      // 박스 안쪽에 실제 인쇄/식품/라벨 신호가 충분히 있어야 상품 패키지로 인정합니다.
+      const density = evidenceCount / Math.max(1, boxArea);
+      if (density < 0.05) return null;
+
+      return { minX, minY, maxX, maxY };
+    }
+
+    function applyCatalogPackageBoxLock(alphaArr, data, width, height) {
+      const box = getCatalogPackageBounds(data, width, height);
+      if (!box) return alphaArr;
+
+      for (let y = 0; y < height; y++) {
+        const rowOffset = y * width;
+        const insideY = y >= box.minY && y <= box.maxY;
+        for (let x = 0; x < width; x++) {
+          const i = rowOffset + x;
+          if (insideY && x >= box.minX && x <= box.maxX) {
+            alphaArr[i] = 255;
+          } else {
+            alphaArr[i] = 0;
+          }
+        }
+      }
+
+      return alphaArr;
+    }
+
     // AI 마스크 알파를 침식합니다. AI 윤곽은 실제 경계보다 바깥으로 번지는 경향이 있어
     // 그대로 합치면 흰 배경 픽셀이 테두리로 남습니다(헤일로).
     function erodeAlpha(alphaArr, width, height, radius) {
@@ -3350,6 +3755,10 @@
       fillEnclosedHoles(finalAlpha, width, height);
       // v8.1: 외곽 보호가 과하게 잡힌 경우 남는 흰 배경 띠를 최종 제거합니다.
       trimOuterWhiteBackgroundResidue(finalAlpha, originalData.data, width, height);
+      // v8.2: 보호 마스크가 만든 외곽 흰 카드/여백은 AI+인쇄 구조 윤곽 기준으로 제거합니다.
+      trimOutsideStructuralProductEnvelope(finalAlpha, originalData.data, width, height, aiAlphaArr);
+      // v8.3: Photoroom 기준 이미지처럼 상품 박스 밖의 흰 배경은 제거하고, 박스 내부 흰 포장/라벨은 보존합니다.
+      applyCatalogPackageBoxLock(finalAlpha, originalData.data, width, height);
 
       for (let i = 0; i < maskData.data.length; i += 4) {
         const pixelIndex = i / 4;
@@ -4112,6 +4521,7 @@
 
     removeMode.addEventListener("change", syncRemoveModeRows);
     syncRemoveModeRows();
+    paddingSelect.disabled = !cropToggle.checked;
 
     cropToggle.addEventListener("change", () => {
       paddingSelect.disabled = !cropToggle.checked;

@@ -49,3 +49,11 @@ http://localhost:5173
 - 상품 패키지 보호 마스크 이후 바깥쪽 순백 여백이 남는 문제 수정
 - `trimOuterWhiteBackgroundResidue()` 추가
 - 내부 흰 라벨/아이보리 포장지는 유지하고 외부 흰 배경만 제거
+
+
+## v83 Catalog Package Box Lock
+
+- 상품 패키지 박스 잠금 추가
+- 흰 포장지/아이보리 라벨/비닐 내부 보존
+- 상품 바깥 흰 배경 제거
+- 자동 크롭 기본 ON
