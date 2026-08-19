@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <!-- v8.3 catalog package box lock: final product bounding-box alpha lock removes outer white card and fills internal holes -->
+  <!-- v8.4 hybrid shape classifier: rectangle package uses box lock, irregular/vacuum/transparent bags use AI shape lock -->
+  <!-- v8.4 hybrid shape classifier: final product bounding-box alpha lock removes outer white card and fills internal holes -->
   <!-- v8.2 structural envelope trim: removes closed outer white card residues after package protection -->
   <!-- v8.1 outer white trim: tested on 7 catalog package images, locks full product surface to prevent transparent holes -->
   <!-- v7.9 pale package surface lock: preserves very light beige/white package paper areas -->
-  <meta name="app-version" content="v83-catalog-package-box-lock">
+  <meta name="app-version" content="v84-hybrid-shape-classifier">
   <!-- v7.8 corner hole repair: open-corner notch fill + product package envelope protect -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
@@ -3624,9 +3625,159 @@
       return { minX, minY, maxX, maxY };
     }
 
+    function getPackageShapeDecision(data, width, height, box) {
+      // v8.4: 모든 상품이 네모난 패키지는 아닙니다.
+      // v8.3의 박스 잠금은 피자/경단/육포 같은 카탈로그형 사각 패키지에는 맞지만,
+      // 진공 비닐·투명 봉투·자연물 포장처럼 실제 외곽이 굴곡진 상품에는 적용하면 안 됩니다.
+      if (!box) return { mode: "none", useBoxLock: false, reason: "no-box" };
+
+      const bg = estimateBackgroundColor(data, width, height);
+      const boxW = box.maxX - box.minX + 1;
+      const boxH = box.maxY - box.minY + 1;
+      const boxArea = Math.max(1, boxW * boxH);
+      const cornerW = Math.max(6, Math.round(boxW * 0.12));
+      const cornerH = Math.max(6, Math.round(boxH * 0.12));
+      const strip = Math.max(2, Math.round(Math.min(boxW, boxH) * 0.02));
+
+      function brightnessAt(x, y) {
+        const p = (y * width + x) * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(x, y, brightness) {
+        const lx = x > 0 ? brightnessAt(x - 1, y) : brightness;
+        const rx = x < width - 1 ? brightnessAt(x + 1, y) : brightness;
+        const ty = y > 0 ? brightnessAt(x, y - 1) : brightness;
+        const by = y < height - 1 ? brightnessAt(x, y + 1) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+      function isCanvasWhite(x, y) {
+        const p = (y * width + x) * 4;
+        if (data[p + 3] < 8) return false;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const chroma = maxC - minC;
+        const brightness = (r + g + b) / 3;
+        const dist = colorDistance(r, g, b, bg);
+        const edge = edgeScore(x, y, brightness);
+        return brightness >= 252 && chroma <= 7 && dist <= 12 && edge <= 12;
+      }
+      function hasStructureSignal(x, y) {
+        const p = (y * width + x) * 4;
+        if (data[p + 3] < 8) return false;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const chroma = maxC - minC;
+        const brightness = (r + g + b) / 3;
+        const dist = colorDistance(r, g, b, bg);
+        const edge = edgeScore(x, y, brightness);
+        return !isCanvasWhite(x, y) && (brightness < 250 || chroma > 7 || dist > 6 || edge > 14);
+      }
+      function regionWhiteRatio(x1, y1, x2, y2) {
+        let white = 0;
+        let count = 0;
+        for (let y = y1; y <= y2; y++) {
+          for (let x = x1; x <= x2; x++) {
+            count++;
+            if (isCanvasWhite(x, y)) white++;
+          }
+        }
+        return count ? white / count : 0;
+      }
+      function edgeCoverage(side) {
+        let hit = 0;
+        let count = 0;
+        if (side === "left" || side === "right") {
+          const x1 = side === "left" ? box.minX : Math.max(box.minX, box.maxX - strip + 1);
+          const x2 = side === "left" ? Math.min(box.maxX, box.minX + strip - 1) : box.maxX;
+          for (let y = box.minY; y <= box.maxY; y++) {
+            count++;
+            let rowHit = false;
+            for (let x = x1; x <= x2; x++) {
+              if (hasStructureSignal(x, y)) { rowHit = true; break; }
+            }
+            if (rowHit) hit++;
+          }
+        } else {
+          const y1 = side === "top" ? box.minY : Math.max(box.minY, box.maxY - strip + 1);
+          const y2 = side === "top" ? Math.min(box.maxY, box.minY + strip - 1) : box.maxY;
+          for (let x = box.minX; x <= box.maxX; x++) {
+            count++;
+            let colHit = false;
+            for (let y = y1; y <= y2; y++) {
+              if (hasStructureSignal(x, y)) { colHit = true; break; }
+            }
+            if (colHit) hit++;
+          }
+        }
+        return count ? hit / count : 0;
+      }
+
+      let whiteCount = 0;
+      for (let y = box.minY; y <= box.maxY; y++) {
+        for (let x = box.minX; x <= box.maxX; x++) {
+          if (isCanvasWhite(x, y)) whiteCount++;
+        }
+      }
+      const boxWhiteRatio = whiteCount / boxArea;
+      const cornerRatios = [
+        regionWhiteRatio(box.minX, box.minY, Math.min(box.maxX, box.minX + cornerW - 1), Math.min(box.maxY, box.minY + cornerH - 1)),
+        regionWhiteRatio(Math.max(box.minX, box.maxX - cornerW + 1), box.minY, box.maxX, Math.min(box.maxY, box.minY + cornerH - 1)),
+        regionWhiteRatio(box.minX, Math.max(box.minY, box.maxY - cornerH + 1), Math.min(box.maxX, box.minX + cornerW - 1), box.maxY),
+        regionWhiteRatio(Math.max(box.minX, box.maxX - cornerW + 1), Math.max(box.minY, box.maxY - cornerH + 1), box.maxX, box.maxY)
+      ];
+      const maxCornerWhite = Math.max(...cornerRatios);
+      const edge = {
+        left: edgeCoverage("left"),
+        right: edgeCoverage("right"),
+        top: edgeCoverage("top"),
+        bottom: edgeCoverage("bottom")
+      };
+      const edgeAverage = (edge.left + edge.right + edge.top + edge.bottom) / 4;
+
+      // 핵심 분기:
+      // - 박스 내부에 순백 여백이 많거나, 한쪽 코너가 거의 흰 배경이면 굴곡형/비닐형 상품입니다.
+      // - 이 경우 사각 박스 전체를 불투명 처리하면 바깥 흰 배경이 같이 살아납니다.
+      // - 따라서 AI/연결성 마스크의 실제 외곽을 유지하고, 사각 박스 잠금은 건너뜁니다.
+      const irregularShape = boxWhiteRatio > 0.30 || maxCornerWhite > 0.82 || (edgeAverage < 0.32 && boxWhiteRatio > 0.22);
+      if (irregularShape) {
+        return {
+          mode: "irregular-ai-shape",
+          useBoxLock: false,
+          reason: "high-inner-white-or-open-corners",
+          boxWhiteRatio,
+          maxCornerWhite,
+          edgeAverage,
+          edge
+        };
+      }
+
+      return {
+        mode: "rectangular-package-box-lock",
+        useBoxLock: true,
+        reason: "solid-printed-package",
+        boxWhiteRatio,
+        maxCornerWhite,
+        edgeAverage,
+        edge
+      };
+    }
+
     function applyCatalogPackageBoxLock(alphaArr, data, width, height) {
       const box = getCatalogPackageBounds(data, width, height);
       if (!box) return alphaArr;
+
+      const decision = getPackageShapeDecision(data, width, height, box);
+      if (!decision.useBoxLock) {
+        // v8.4: 대파/투명 진공팩/굴곡형 비닐처럼 네모가 아닌 상품은
+        // 사각 박스로 채우지 않고 기존 AI 형태 마스크를 유지합니다.
+        return alphaArr;
+      }
 
       for (let y = 0; y < height; y++) {
         const rowOffset = y * width;
