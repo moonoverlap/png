@@ -1,6 +1,6 @@
 {
-  "name": "image-toolkit-v72-precision-product",
-  "version": "7.2.0",
+  "name": "png-background-studio-v44-remover-studio",
+  "version": "4.4.0",
   "private": true,
   "scripts": {
     "start": "node server.js"

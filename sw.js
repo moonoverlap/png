@@ -1,4 +1,4 @@
-const CACHE_NAME = "image-toolkit-v60-multi-tool";
+const CACHE_NAME = "image-toolkit-v74-hybrid";
 const APP_SHELL = [
   "./",
   "./index.html",

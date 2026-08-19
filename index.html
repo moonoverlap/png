@@ -1,8 +1,6 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <!-- v7.2 precision product package mode: protects white labels/packages and follows product envelope -->
-  <!-- v7.1 subject white protection: protects white package/label areas from background flood-fill -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
   <!-- v4.3 accuracy restore: deployed v1.5 engine preserved -->
@@ -981,22 +979,21 @@
           <div class="form-row">
             <label for="removeMode">제거 방식</label>
             <select id="removeMode">
-              <option value="product_package" selected>상품 패키지 정밀 · 흰 포장/라벨 보호</option>
-              <option value="ai_foreground">AI 피사체 인식 · 복잡한 배경용</option>
-              <option value="background_only">기본 배경만 제거 · 단순 흰 배경용</option>
+              <option value="ai_foreground" selected>AI 피사체 인식 · 기본 권장</option>
+              <option value="background_only">배경만 제거 · 빠른 처리용</option>
             </select>
           </div>
 
           <div class="form-row">
             <label for="qualitySelect">처리 품질</label>
             <select id="qualitySelect">
-              <option value="fast">빠름 · 기본 배경 제거</option>
+              <option value="fast">빠름</option>
               <option value="standard" selected>표준 · 권장</option>
-              <option value="high">고품질 · 그림자/그라데이션 제거 강화</option>
+              <option value="high">고품질 · 느릴 수 있음</option>
             </select>
           </div>
 
-          <div class="form-row">
+          <div class="form-row" id="sensitivityRow">
             <label for="sensitivitySelect">배경 제거 감도</label>
             <select id="sensitivitySelect">
               <option value="low">낮음 · 오브젝트 보존 우선</option>
@@ -1015,7 +1012,7 @@
             </select>
           </div>
 
-          <div class="form-row" id="modelRow" style="display:none;">
+          <div class="form-row" id="modelRow">
             <label for="modelSelect">AI 모델 품질</label>
             <select id="modelSelect">
               <option value="isnet_fp16" selected>표준 품질 · 권장</option>
@@ -1036,7 +1033,7 @@
             </select>
           </div>
 
-          <p class="notice">자동 크롭은 배경 제거가 끝난 뒤 투명 영역을 기준으로 여백을 잘라냅니다.</p>
+          <p class="notice">"AI 피사체 인식"은 AI 윤곽 인식과 색상 연결성 판정을 함께 적용해, 흰 배경 위 흰 글자·로고나 패키지 하단 흰 영역까지 온전히 보존합니다. 결과에서 일부가 잘려나가면 감도를 "낮음"으로, 배경이 덜 지워지면 "높음"으로 조절하세요. 자동 크롭은 배경 제거가 끝난 뒤 투명 영역을 기준으로 여백을 잘라냅니다.</p>
         </div>
 
         <div id="optsResize" class="tool-options">
@@ -1328,6 +1325,7 @@
     const urlFetchBtn = document.getElementById("urlFetchBtn");
     const removeMode = document.getElementById("removeMode");
     const qualitySelect = document.getElementById("qualitySelect");
+    const sensitivityRow = document.getElementById("sensitivityRow");
     const sensitivitySelect = document.getElementById("sensitivitySelect");
     const outputScaleSelect = document.getElementById("outputScaleSelect");
     const modelRow = document.getElementById("modelRow");
@@ -2199,7 +2197,7 @@
       updateActionStates();
     }
 
-    // ---- Removal engine (v1.5, preserved) ----
+    // ---- Removal engine (v2.0: strict connectivity flood-fill) ----
     function median(values) {
       const sorted = values.slice().sort((a, b) => a - b);
       return sorted[Math.floor(sorted.length / 2)] || 255;
@@ -2242,310 +2240,20 @@
       return Math.sqrt(dr * dr + dg * dg + db * db);
     }
 
-    function getChroma(r, g, b) {
-      return Math.max(r, g, b) - Math.min(r, g, b);
-    }
-
-    function isBlueProtected(r, g, b) {
-      const avg = (r + g + b) / 3;
-      const chroma = getChroma(r, g, b);
-      const blueBias = b - Math.max(r, g);
-      const purpleBias = (b + r) / 2 - g;
-
-      if (b > 150 && blueBias > 8 && chroma > 18) return true;
-      if (b > 165 && purpleBias > 10 && avg < 238 && chroma > 14) return true;
-      if (r < 225 && g < 230 && b > 235 && chroma > 16) return true;
-
-      return false;
-    }
-
     function getParams(quality, sensitivity) {
-      const table = {
-        fast: {
-          low:      { floodTolerance: 26, whiteLimit: 250, neutralChroma: 9, shadowLimit: 238, feather: 8, passes: 1 },
-          standard: { floodTolerance: 34, whiteLimit: 248, neutralChroma: 12, shadowLimit: 232, feather: 12, passes: 1 },
-          high:     { floodTolerance: 44, whiteLimit: 246, neutralChroma: 15, shadowLimit: 224, feather: 16, passes: 1 },
-          max:      { floodTolerance: 54, whiteLimit: 244, neutralChroma: 18, shadowLimit: 216, feather: 18, passes: 1 }
-        },
-        standard: {
-          low:      { floodTolerance: 34, whiteLimit: 248, neutralChroma: 12, shadowLimit: 234, feather: 12, passes: 2 },
-          standard: { floodTolerance: 46, whiteLimit: 246, neutralChroma: 16, shadowLimit: 226, feather: 18, passes: 2 },
-          high:     { floodTolerance: 60, whiteLimit: 243, neutralChroma: 22, shadowLimit: 216, feather: 24, passes: 2 },
-          max:      { floodTolerance: 74, whiteLimit: 240, neutralChroma: 28, shadowLimit: 206, feather: 28, passes: 2 }
-        },
-        high: {
-          low:      { floodTolerance: 42, whiteLimit: 247, neutralChroma: 14, shadowLimit: 230, feather: 16, passes: 3 },
-          standard: { floodTolerance: 58, whiteLimit: 244, neutralChroma: 20, shadowLimit: 218, feather: 24, passes: 3 },
-          high:     { floodTolerance: 76, whiteLimit: 240, neutralChroma: 28, shadowLimit: 206, feather: 32, passes: 3 },
-          max:      { floodTolerance: 96, whiteLimit: 236, neutralChroma: 36, shadowLimit: 192, feather: 38, passes: 3 }
-        }
+      const toleranceBySensitivity = { low: 20, standard: 28, high: 40, max: 56 };
+      const featherByQuality = { fast: 6, standard: 10, high: 16 };
+
+      return {
+        floodTolerance: toleranceBySensitivity[sensitivity] ?? 28,
+        feather: featherByQuality[quality] ?? 10
       };
-
-      return table[quality]?.[sensitivity] || table.standard.standard;
     }
 
-
-    async function removeProductPackageBackground(originalFile, quality, sensitivity, outputScale = 1) {
-      const image = await blobToImage(originalFile);
-      const originalWidth = image.naturalWidth || image.width;
-      const originalHeight = image.naturalHeight || image.height;
-      const scale = Math.max(1, Number(outputScale) || 1);
-      const width = Math.round(originalWidth * scale);
-      const height = Math.round(originalHeight * scale);
-      const total = width * height;
-
-      const sourceCanvas = document.createElement("canvas");
-      const outputCanvas = document.createElement("canvas");
-      sourceCanvas.width = outputCanvas.width = width;
-      sourceCanvas.height = outputCanvas.height = height;
-
-      const sourceCtx = sourceCanvas.getContext("2d", { willReadFrequently: true });
-      const outputCtx = outputCanvas.getContext("2d", { willReadFrequently: true });
-      sourceCtx.imageSmoothingEnabled = true;
-      sourceCtx.imageSmoothingQuality = "high";
-      sourceCtx.drawImage(image, 0, 0, width, height);
-
-      const sourceData = sourceCtx.getImageData(0, 0, width, height);
-      const outputData = outputCtx.createImageData(width, height);
-      const data = sourceData.data;
-      const bg = estimateBackgroundColor(data, width, height);
-
-      const anchorMask = new Uint8Array(total);
-      const rowCount = new Int32Array(height);
-      const colCount = new Int32Array(width);
-      const rowMin = new Int32Array(height);
-      const rowMax = new Int32Array(height);
-      const colMin = new Int32Array(width);
-      const colMax = new Int32Array(width);
-      rowMin.fill(width);
-      rowMax.fill(-1);
-      colMin.fill(height);
-      colMax.fill(-1);
-
-      const baseThreshold = quality === "high" ? 10 : quality === "fast" ? 18 : 14;
-      const sensitivityBonus = sensitivity === "high" ? -2 : sensitivity === "max" ? -4 : sensitivity === "low" ? 4 : 0;
-      const distThreshold = Math.max(8, baseThreshold + sensitivityBonus);
-
-      function isProductAnchor(r, g, b, a) {
-        if (a < 8) return false;
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        const avg = (r + g + b) / 3;
-        const chroma = max - min;
-        const saturation = max === 0 ? 0 : chroma / max;
-        const dist = colorDistance(r, g, b, bg);
-
-        // Product/package anchors: print, logo, food photo, colored film, blue/red seals,
-        // gray fold shadows, and off-white package boundaries. These anchors are used only
-        // to infer the subject envelope; enclosed white pixels are kept later.
-        if (isBlueProtected(r, g, b)) return true;
-        if (avg < 245 && dist > distThreshold) return true;
-        if (avg < 252 && saturation > 0.035) return true;
-        if (avg < 228 && chroma <= 18 && dist > distThreshold * 0.75) return true;
-        if (r > g + 10 && r > b + 12 && r > 95) return true;
-        if (b > r + 5 && b > g - 12 && b > 120 && saturation > 0.035) return true;
-        return false;
-      }
-
-      function markAnchor(index, x, y) {
-        anchorMask[index] = 1;
-        rowCount[y]++;
-        colCount[x]++;
-        if (x < rowMin[y]) rowMin[y] = x;
-        if (x > rowMax[y]) rowMax[y] = x;
-        if (y < colMin[x]) colMin[x] = y;
-        if (y > colMax[x]) colMax[x] = y;
-      }
-
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const index = y * width + x;
-          const p = index * 4;
-          if (isProductAnchor(data[p], data[p + 1], data[p + 2], data[p + 3])) {
-            markAnchor(index, x, y);
-          }
-        }
-      }
-
-      const minRowCount = Math.max(2, Math.round(width * 0.004));
-      const minColCount = Math.max(2, Math.round(height * 0.004));
-      const validRows = [];
-      const validCols = [];
-
-      for (let y = 0; y < height; y++) {
-        if (rowCount[y] >= minRowCount && rowMax[y] >= rowMin[y]) validRows.push(y);
-      }
-      for (let x = 0; x < width; x++) {
-        if (colCount[x] >= minColCount && colMax[x] >= colMin[x]) validCols.push(x);
-      }
-
-      // If the image has no reliable package anchors, use the safer connected-background mode.
-      if (validRows.length < 8 || validCols.length < 8) {
-        return removeConnectedBackground(originalFile, quality, sensitivity, outputScale);
-      }
-
-      const top = validRows[0];
-      const bottom = validRows[validRows.length - 1];
-      const left = validCols[0];
-      const right = validCols[validCols.length - 1];
-      const minSubjectSpan = Math.max(18, Math.round(Math.min(width, height) * 0.055));
-
-      function interpolateRanges(minArr, maxArr, validList, size) {
-        const outMin = new Float32Array(size);
-        const outMax = new Float32Array(size);
-        let cursor = 0;
-
-        for (let i = 0; i < size; i++) {
-          if (i <= validList[0]) {
-            outMin[i] = minArr[validList[0]];
-            outMax[i] = maxArr[validList[0]];
-            continue;
-          }
-          if (i >= validList[validList.length - 1]) {
-            const last = validList[validList.length - 1];
-            outMin[i] = minArr[last];
-            outMax[i] = maxArr[last];
-            continue;
-          }
-
-          while (cursor < validList.length - 2 && validList[cursor + 1] < i) cursor++;
-          const prev = validList[cursor];
-          const next = validList[cursor + 1];
-          const t = next === prev ? 0 : (i - prev) / (next - prev);
-          outMin[i] = minArr[prev] + (minArr[next] - minArr[prev]) * t;
-          outMax[i] = maxArr[prev] + (maxArr[next] - maxArr[prev]) * t;
-        }
-
-        return { min: outMin, max: outMax };
-      }
-
-      const rowRange = interpolateRanges(rowMin, rowMax, validRows, height);
-      const colRange = interpolateRanges(colMin, colMax, validCols, width);
-      const rowEnvelopeMin = new Int32Array(height);
-      const rowEnvelopeMax = new Int32Array(height);
-      const colEnvelopeMin = new Int32Array(width);
-      const colEnvelopeMax = new Int32Array(width);
-      rowEnvelopeMin.fill(width);
-      rowEnvelopeMax.fill(-1);
-      colEnvelopeMin.fill(height);
-      colEnvelopeMax.fill(-1);
-
-      const smoothY = Math.max(5, Math.round(Math.min(width, height) * 0.018));
-      const smoothX = Math.max(5, Math.round(Math.min(width, height) * 0.018));
-      const pad = Math.max(2, Math.round(Math.min(width, height) * 0.008));
-
-      for (let y = top; y <= bottom; y++) {
-        const y0 = Math.max(top, y - smoothY);
-        const y1 = Math.min(bottom, y + smoothY);
-        let mn = width;
-        let mx = -1;
-        for (let yy = y0; yy <= y1; yy++) {
-          if (rowRange.min[yy] < mn) mn = rowRange.min[yy];
-          if (rowRange.max[yy] > mx) mx = rowRange.max[yy];
-        }
-        if (mx - mn >= minSubjectSpan) {
-          rowEnvelopeMin[y] = Math.max(0, Math.floor(mn) - pad);
-          rowEnvelopeMax[y] = Math.min(width - 1, Math.ceil(mx) + pad);
-        }
-      }
-
-      for (let x = left; x <= right; x++) {
-        const x0 = Math.max(left, x - smoothX);
-        const x1 = Math.min(right, x + smoothX);
-        let mn = height;
-        let mx = -1;
-        for (let xx = x0; xx <= x1; xx++) {
-          if (colRange.min[xx] < mn) mn = colRange.min[xx];
-          if (colRange.max[xx] > mx) mx = colRange.max[xx];
-        }
-        if (mx - mn >= minSubjectSpan) {
-          colEnvelopeMin[x] = Math.max(0, Math.floor(mn) - pad);
-          colEnvelopeMax[x] = Math.min(height - 1, Math.ceil(mx) + pad);
-        }
-      }
-
-      const productMask = new Uint8Array(total);
-      for (let y = top; y <= bottom; y++) {
-        const x0 = rowEnvelopeMin[y];
-        const x1 = rowEnvelopeMax[y];
-        if (x1 < x0) continue;
-        for (let x = x0; x <= x1; x++) {
-          if (x < left - pad || x > right + pad) continue;
-          const c0 = colEnvelopeMin[x];
-          const c1 = colEnvelopeMax[x];
-          if (c1 < c0) continue;
-          if (y >= c0 && y <= c1) productMask[y * width + x] = 1;
-        }
-      }
-
-      // Re-include every printed/colored anchor and its immediate neighbors so thin type,
-      // HACCP marks, check patterns, seal borders, and fold lines are never lost.
-      const anchorRadius = Math.max(1, Math.round(Math.min(width, height) * 0.004));
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const index = y * width + x;
-          if (!anchorMask[index]) continue;
-          const y0 = Math.max(0, y - anchorRadius);
-          const y1 = Math.min(height - 1, y + anchorRadius);
-          const x0 = Math.max(0, x - anchorRadius);
-          const x1 = Math.min(width - 1, x + anchorRadius);
-          for (let yy = y0; yy <= y1; yy++) {
-            for (let xx = x0; xx <= x1; xx++) {
-              productMask[yy * width + xx] = 1;
-            }
-          }
-        }
-      }
-
-      // Small gap close without changing the subject interior: if a pixel is surrounded by
-      // the product envelope, keep it. This is what prevents white package areas from disappearing.
-      const closedMask = new Uint8Array(productMask);
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const index = y * width + x;
-          if (productMask[index]) continue;
-          let count = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue;
-              if (productMask[(y + dy) * width + x + dx]) count++;
-            }
-          }
-          if (count >= 6) closedMask[index] = 1;
-        }
-      }
-
-      function edgeAlpha(index, x, y) {
-        if (!closedMask[index]) return 0;
-        if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return 0;
-        let outside = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            if (!closedMask[(y + dy) * width + x + dx]) outside++;
-          }
-        }
-        if (outside === 0) return 255;
-        if (outside <= 2) return 224;
-        if (outside <= 4) return 190;
-        return 150;
-      }
-
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const index = y * width + x;
-          const p = index * 4;
-          outputData.data[p] = data[p];
-          outputData.data[p + 1] = data[p + 1];
-          outputData.data[p + 2] = data[p + 2];
-          outputData.data[p + 3] = edgeAlpha(index, x, y);
-        }
-      }
-
-      outputCtx.putImageData(outputData, 0, 0);
-      return canvasToPngBlob(outputCanvas);
-    }
-
+    // 이미지 가장자리에서 시작해 배경 추정색과의 거리(dist)가 허용치 이내인 픽셀만
+    // 연결(flood-fill)해서 배경으로 판정합니다. 색상 자체가 아니라 "가장자리와 연결되어 있는지"를
+    // 기준으로 삼기 때문에, 패키지 내부의 파스텔톤 무늬·흰 접시·크럼 텍스처처럼 가장자리와
+    // 끊겨 있는 밝은 영역은 아무리 흰색/저채도여도 배경으로 오인하지 않습니다.
     async function removeConnectedBackground(originalFile, quality, sensitivity, outputScale = 1) {
       const image = await blobToImage(originalFile);
       const originalWidth = image.naturalWidth || image.width;
@@ -2571,227 +2279,29 @@
       const data = sourceData.data;
       const bg = estimateBackgroundColor(data, width, height);
       const params = getParams(quality, sensitivity);
+      const softTolerance = params.floodTolerance + params.feather;
 
       const total = width * height;
+      const distArr = new Float32Array(total);
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        distArr[i] = colorDistance(data[p], data[p + 1], data[p + 2], bg);
+      }
 
-      // v7.1 subject protection:
-      // White package/label areas can be visually identical to a white background.
-      // If flood-fill sees those whites as background, it punches holes inside the product.
-      // This mask uses printed colors, dark text, food colors, blue package areas, and nearby
-      // enclosed regions to protect the actual subject before background flood-fill runs.
-      const subjectProtectMask = buildSubjectProtectionMask();
-
-      const bgMask = new Uint8Array(total);
+      const reachable = new Uint8Array(total);
       const queue = [];
       let head = 0;
 
-      function buildSubjectProtectionMask() {
-        const support = new Uint8Array(total);
-        const protectedMask = new Uint8Array(total);
-        const rowMin = new Int32Array(height);
-        const rowMax = new Int32Array(height);
-        const colMin = new Int32Array(width);
-        const colMax = new Int32Array(width);
-
-        rowMin.fill(width);
-        rowMax.fill(-1);
-        colMin.fill(height);
-        colMax.fill(-1);
-
-        function markSupport(index, x, y) {
-          support[index] = 1;
-          if (x < rowMin[y]) rowMin[y] = x;
-          if (x > rowMax[y]) rowMax[y] = x;
-          if (y < colMin[x]) colMin[x] = y;
-          if (y > colMax[x]) colMax[x] = y;
-        }
-
-        function isStrongSubjectPixel(r, g, b, a) {
-          if (a < 8) return false;
-
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          const avg = (r + g + b) / 3;
-          const chroma = max - min;
-          const saturation = max === 0 ? 0 : chroma / max;
-
-          // Strong subject anchors: printed text/logo, food colors, colored packages,
-          // pale blue packaging, black/dark copy, HACCP marks, etc.
-          if (isBlueProtected(r, g, b)) return true;
-          if (avg < 118) return true;
-          if (avg < 178 && chroma > 10) return true;
-          if (saturation > 0.075 && avg < 252) return true;
-          if (r > g + 10 && r > b + 12 && r > 95) return true;
-          if (g > r - 18 && g > b - 24 && g > 76 && saturation > 0.045) return true;
-          if (b > r + 6 && b > g - 10 && b > 130 && saturation > 0.045) return true;
-
-          return false;
-        }
-
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const index = y * width + x;
-            const p = index * 4;
-            if (isStrongSubjectPixel(data[p], data[p + 1], data[p + 2], data[p + 3])) {
-              markSupport(index, x, y);
-            }
-          }
-        }
-
-        // If no reliable subject anchors exist, avoid over-protecting.
-        let supportCount = 0;
-        for (let i = 0; i < total; i++) {
-          if (support[i]) supportCount++;
-        }
-
-        if (supportCount < Math.max(24, total * 0.0006)) {
-          return protectedMask;
-        }
-
-        // 1) Direct dilation around strong subject pixels.
-        // This blocks the flood-fill from biting into labels and pale package edges.
-        const radius = Math.max(4, Math.round(Math.min(width, height) * 0.018));
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const index = y * width + x;
-            if (!support[index]) continue;
-
-            const y0 = Math.max(0, y - radius);
-            const y1 = Math.min(height - 1, y + radius);
-            const x0 = Math.max(0, x - radius);
-            const x1 = Math.min(width - 1, x + radius);
-
-            for (let yy = y0; yy <= y1; yy++) {
-              const dy = yy - y;
-              for (let xx = x0; xx <= x1; xx++) {
-                const dx = xx - x;
-                if (dx * dx + dy * dy <= radius * radius) {
-                  protectedMask[yy * width + xx] = 1;
-                }
-              }
-            }
-          }
-        }
-
-        // Smooth row/column support bounds so small gaps in text/graphics do not break the package body.
-        const smoothRadius = Math.max(3, Math.round(Math.min(width, height) * 0.012));
-        const sRowMin = new Int32Array(height);
-        const sRowMax = new Int32Array(height);
-        const sColMin = new Int32Array(width);
-        const sColMax = new Int32Array(width);
-        sRowMin.fill(width);
-        sRowMax.fill(-1);
-        sColMin.fill(height);
-        sColMax.fill(-1);
-
-        for (let y = 0; y < height; y++) {
-          const y0 = Math.max(0, y - smoothRadius);
-          const y1 = Math.min(height - 1, y + smoothRadius);
-          for (let yy = y0; yy <= y1; yy++) {
-            if (rowMax[yy] >= 0) {
-              if (rowMin[yy] < sRowMin[y]) sRowMin[y] = rowMin[yy];
-              if (rowMax[yy] > sRowMax[y]) sRowMax[y] = rowMax[yy];
-            }
-          }
-        }
-
-        for (let x = 0; x < width; x++) {
-          const x0 = Math.max(0, x - smoothRadius);
-          const x1 = Math.min(width - 1, x + smoothRadius);
-          for (let xx = x0; xx <= x1; xx++) {
-            if (colMax[xx] >= 0) {
-              if (colMin[xx] < sColMin[x]) sColMin[x] = colMin[xx];
-              if (colMax[xx] > sColMax[x]) sColMax[x] = colMax[xx];
-            }
-          }
-        }
-
-        // 2) Enclosed white protection:
-        // A neutral/white pixel is protected only when it lies between subject anchors
-        // both horizontally and vertically. This keeps white labels/packages while still
-        // allowing the outside white background to be removed from the edges.
-        const enclosurePad = Math.max(4, Math.round(Math.min(width, height) * 0.015));
-        const minSpan = Math.max(18, Math.round(Math.min(width, height) * 0.06));
-
-        for (let y = 0; y < height; y++) {
-          const rMin = sRowMin[y];
-          const rMax = sRowMax[y];
-          if (rMax - rMin < minSpan) continue;
-
-          for (let x = Math.max(0, rMin - enclosurePad); x <= Math.min(width - 1, rMax + enclosurePad); x++) {
-            const cMin = sColMin[x];
-            const cMax = sColMax[x];
-            if (cMax - cMin < minSpan) continue;
-            if (y < cMin - enclosurePad || y > cMax + enclosurePad) continue;
-
-            const index = y * width + x;
-            const p = index * 4;
-            const a = data[p + 3];
-            if (a < 8) continue;
-
-            const r = data[p];
-            const g = data[p + 1];
-            const b = data[p + 2];
-            const avg = (r + g + b) / 3;
-            const chroma = getChroma(r, g, b);
-
-            // Protect enclosed whites, pale labels, light blue package areas, and soft print regions.
-            if (avg > 176 && chroma <= 46) {
-              protectedMask[index] = 1;
-            } else if (avg > 145 && chroma <= 70 && colorDistance(r, g, b, bg) > params.floodTolerance * 0.55) {
-              protectedMask[index] = 1;
-            }
-          }
-        }
-
-        // 3) Edge clamp:
-        // Do not protect neutral pixels that touch the outermost image border,
-        // otherwise plain white page backgrounds may remain.
-        for (let x = 0; x < width; x++) {
-          protectedMask[x] = 0;
-          protectedMask[(height - 1) * width + x] = 0;
-        }
-        for (let y = 0; y < height; y++) {
-          protectedMask[y * width] = 0;
-          protectedMask[y * width + width - 1] = 0;
-        }
-
-        return protectedMask;
-      }
-
-      function isNeutralBrightBackground(index) {
+      function isSoftBackground(index) {
         const p = index * 4;
-        const r = data[p];
-        const g = data[p + 1];
-        const b = data[p + 2];
-        const a = data[p + 3];
-
-        if (a < 8) return true;
-        if (subjectProtectMask[index]) return false;
-        if (isBlueProtected(r, g, b)) return false;
-
-        const avg = (r + g + b) / 3;
-        const chroma = getChroma(r, g, b);
-        const dist = colorDistance(r, g, b, bg);
-
-        if (dist <= params.floodTolerance) return true;
-
-        if (avg >= params.whiteLimit && chroma <= params.neutralChroma + 8) return true;
-
-        if (avg >= params.shadowLimit && chroma <= params.neutralChroma) return true;
-
-        if (bg.r > 238 && bg.g > 238 && bg.b > 238) {
-          const grayShadow = Math.abs(r - g) < params.neutralChroma && Math.abs(g - b) < params.neutralChroma && avg > params.shadowLimit;
-          if (grayShadow) return true;
-        }
-
-        return false;
+        if (data[p + 3] < 8) return true;
+        return distArr[index] <= softTolerance;
       }
 
       function enqueue(index) {
-        if (index < 0 || index >= total || bgMask[index]) return;
-        if (!isNeutralBrightBackground(index)) return;
-        bgMask[index] = 1;
+        if (index < 0 || index >= total || reachable[index]) return;
+        if (!isSoftBackground(index)) return;
+        reachable[index] = 1;
         queue.push(index);
       }
 
@@ -2816,88 +2326,25 @@
         if (y < height - 1) enqueue(index + width);
       }
 
-      function neighborBackgroundScore(index) {
-        const x = index % width;
-        const y = Math.floor(index / width);
-        let score = 0;
-        let count = 0;
-
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-            count++;
-            if (bgMask[ny * width + nx]) score++;
-          }
-        }
-
-        return count ? score / count : 0;
-      }
-
-      for (let pass = 0; pass < params.passes; pass++) {
-        const additions = [];
-        for (let i = 0; i < total; i++) {
-          if (bgMask[i]) continue;
-          if (subjectProtectMask[i]) continue;
-
-          const p = i * 4;
-          const r = data[p];
-          const g = data[p + 1];
-          const b = data[p + 2];
-          if (isBlueProtected(r, g, b)) continue;
-
-          const avg = (r + g + b) / 3;
-          const chroma = getChroma(r, g, b);
-          const neighborScore = neighborBackgroundScore(i);
-
-          if (neighborScore >= 0.42 && avg >= params.shadowLimit && chroma <= params.neutralChroma + 6) {
-            additions.push(i);
-          }
-        }
-
-        for (const index of additions) {
-          bgMask[index] = 1;
-        }
-      }
-
-      function getAlphaForForeground(index) {
-        const p = index * 4;
-        const r = data[p];
-        const g = data[p + 1];
-        const b = data[p + 2];
-        const a = data[p + 3];
-
-        if (a < 8) return 0;
-        if (bgMask[index]) return 0;
-        if (subjectProtectMask[index]) return a;
-        if (isBlueProtected(r, g, b)) return a;
-
-        const avg = (r + g + b) / 3;
-        const chroma = getChroma(r, g, b);
-        const dist = colorDistance(r, g, b, bg);
-        const neighborScore = neighborBackgroundScore(index);
-
-        if (neighborScore > 0.20 && avg > params.shadowLimit && chroma <= params.neutralChroma) {
-          const keep = Math.max(0, Math.min(1, (dist - params.floodTolerance) / Math.max(1, params.feather)));
-          if (keep < 0.18) return 0;
-          return Math.max(35, Math.round(255 * keep));
-        }
-
-        if (sensitivity === "max" && avg > params.whiteLimit && chroma <= params.neutralChroma + 4 && neighborScore > 0.04) {
-          return 0;
-        }
-
-        return a;
-      }
-
       for (let i = 0; i < total; i++) {
         const p = i * 4;
         outputData.data[p] = data[p];
         outputData.data[p + 1] = data[p + 1];
         outputData.data[p + 2] = data[p + 2];
-        outputData.data[p + 3] = getAlphaForForeground(i);
+
+        let alpha = data[p + 3];
+
+        if (reachable[i]) {
+          const dist = distArr[i];
+          if (dist <= params.floodTolerance) {
+            alpha = 0;
+          } else {
+            const t = Math.min(1, Math.max(0, (dist - params.floodTolerance) / Math.max(1, params.feather)));
+            alpha = Math.round(alpha * t);
+          }
+        }
+
+        outputData.data[p + 3] = alpha;
       }
 
       outputCtx.putImageData(outputData, 0, 0);
@@ -2915,6 +2362,70 @@
       }
 
       return removeBackgroundFn;
+    }
+
+    // 이미지 가장자리에서 배경색과 가까운 픽셀만 연결(flood-fill)해 배경 알파를 계산합니다.
+    // AI 마스크와 합집합(둘 중 하나라도 전경이면 보존)으로 결합하기 위한 보조 계산입니다.
+    function computeColorBackgroundAlpha(data, width, height, quality, sensitivity) {
+      const bg = estimateBackgroundColor(data, width, height);
+      const params = getParams(quality, sensitivity);
+      const softTolerance = params.floodTolerance + params.feather;
+      const total = width * height;
+
+      const distArr = new Float32Array(total);
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        distArr[i] = colorDistance(data[p], data[p + 1], data[p + 2], bg);
+      }
+
+      const reachable = new Uint8Array(total);
+      const queue = [];
+      let head = 0;
+
+      function enqueue(index) {
+        if (index < 0 || index >= total || reachable[index]) return;
+        const p = index * 4;
+        const isSoft = data[p + 3] < 8 || distArr[index] <= softTolerance;
+        if (!isSoft) return;
+        reachable[index] = 1;
+        queue.push(index);
+      }
+
+      for (let x = 0; x < width; x++) {
+        enqueue(x);
+        enqueue((height - 1) * width + x);
+      }
+      for (let y = 0; y < height; y++) {
+        enqueue(y * width);
+        enqueue(y * width + width - 1);
+      }
+
+      while (head < queue.length) {
+        const index = queue[head++];
+        const x = index % width;
+        const y = Math.floor(index / width);
+        if (x > 0) enqueue(index - 1);
+        if (x < width - 1) enqueue(index + 1);
+        if (y > 0) enqueue(index - width);
+        if (y < height - 1) enqueue(index + width);
+      }
+
+      const alphaArr = new Uint8Array(total);
+      for (let i = 0; i < total; i++) {
+        if (!reachable[i]) {
+          alphaArr[i] = 255;
+          continue;
+        }
+        const dist = distArr[i];
+        if (dist <= params.floodTolerance) {
+          alphaArr[i] = 0;
+        } else {
+          const t = Math.min(1, Math.max(0, (dist - params.floodTolerance) / Math.max(1, params.feather)));
+          alphaArr[i] = Math.round(255 * t);
+        }
+      }
+
+      return alphaArr;
     }
 
     async function rebuildPngWithOriginalColor(originalFile, maskBlob, outputScale = 1) {
@@ -2947,8 +2458,30 @@
       const maskData = maskCtx.getImageData(0, 0, width, height);
       const outputData = outputCtx.createImageData(width, height);
 
+      // 색상 연결성 기반 알파 (패키지 하단 흰 영역처럼 AI가 놓치는 부분을 지켜줍니다)
+      const colorAlpha = computeColorBackgroundAlpha(
+        originalData.data,
+        width,
+        height,
+        qualitySelect.value,
+        sensitivitySelect.value
+      );
+
+      // AI 마스크의 알파는 불확실한 영역에서 중간값으로 뭉개져 반투명(고스트) 현상을 만듭니다.
+      // 임계값 구간으로 압축·확장해 확실한 전경/배경을 분명히 갈라줍니다.
+      const ALPHA_LOW = 30;
+      const ALPHA_HIGH = 90;
+
       for (let i = 0; i < maskData.data.length; i += 4) {
-        const alpha = maskData.data[i + 3] < 12 ? 0 : maskData.data[i + 3];
+        const pixelIndex = i / 4;
+
+        const rawAlpha = maskData.data[i + 3];
+        const stretched = ((rawAlpha - ALPHA_LOW) / (ALPHA_HIGH - ALPHA_LOW)) * 255;
+        const aiAlpha = Math.max(0, Math.min(255, Math.round(stretched)));
+
+        // 합집합: AI와 색상 판정 중 하나라도 "전경"이라고 보면 보존합니다.
+        // AI가 놓친 흰 영역은 색상 쪽이, 색상이 뚫어버린 글자 사이는 AI 쪽이 막아줍니다.
+        const alpha = Math.max(aiAlpha, colorAlpha[pixelIndex]);
 
         outputData.data[i] = originalData.data[i];
         outputData.data[i + 1] = originalData.data[i + 1];
@@ -3439,11 +2972,7 @@
           let ext = meta.ext;
 
           if (currentTool === "removeBg") {
-            if (removeMode.value === "product_package") {
-              setProgress(`${item.file.name} · 상품 패키지 정밀 분석 중`, overallPercent(i, targets.length, 25));
-              blob = await removeProductPackageBackground(item.file, qualitySelect.value, sensitivitySelect.value, getOutputScale());
-              setProgress(`${item.file.name} · 흰 포장/라벨 보호 적용`, overallPercent(i, targets.length, 80));
-            } else if (removeMode.value === "background_only") {
+            if (removeMode.value === "background_only") {
               setProgress(`${item.file.name} · 배경 분석 중`, overallPercent(i, targets.length, 25));
               blob = await removeConnectedBackground(item.file, qualitySelect.value, sensitivitySelect.value, getOutputScale());
               setProgress(`${item.file.name} · 투명 PNG 생성`, overallPercent(i, targets.length, 80));
@@ -3704,9 +3233,14 @@
       }
     });
 
-    removeMode.addEventListener("change", () => {
-      modelRow.style.display = removeMode.value === "ai_foreground" ? "block" : "none";
-    });
+    function syncRemoveModeRows() {
+      const isAi = removeMode.value === "ai_foreground";
+      modelRow.style.display = isAi ? "block" : "none";
+      sensitivityRow.style.display = "block";
+    }
+
+    removeMode.addEventListener("change", syncRemoveModeRows);
+    syncRemoveModeRows();
 
     cropToggle.addEventListener("change", () => {
       paddingSelect.disabled = !cropToggle.checked;
