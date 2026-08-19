@@ -1,3 +1,5 @@
 *.zip
 _deploy_png/
 png/
+node_modules/
+.DS_Store

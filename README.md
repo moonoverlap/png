@@ -94,3 +94,19 @@ http://localhost:5173
 
 - 명란/접시/클로즈업 식품 사진은 AI 원본 마스크 우선 처리
 - 일반 푸드 사진에 패키지 보호/사각 외곽 보정이 적용되지 않도록 수정
+
+
+## v89 무료 RMBG API 모드
+
+- 무료 AI 누끼 서버 URL을 입력해 외부 RMBG API를 우선 호출합니다.
+- API가 없거나 실패하면 기존 브라우저 로컬 AI로 자동 대체합니다.
+- `hf-space-rmbg-api/` 폴더에 Hugging Face Space용 서버 예제를 포함했습니다.
+- Photoroom API가 아니라 오픈소스 기반 무료 대안입니다.
+
+
+## v90 API-free Segmentation + Matting
+
+- 외부 API 서버 없이 브라우저 로컬 AI만 사용
+- Segmentation과 Matting을 분리한 2단계 구조
+- 상품별 예외 보정은 기본 경로에서 제외
+- `PIPELINE_V90.md` 참고
