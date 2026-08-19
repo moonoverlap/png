@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v8.7 natural food/photo AI-first mode: bypass package locks for dish/plate photos -->
   <!-- v8.6 no artificial outline: protect subject without drawing rectangular/stroke envelopes -->
   <!-- v8.5 soft-pack AI-first: transparent/vacuum/irregular packages bypass broad box/envelope protection -->
   <!-- v8.4 hybrid shape classifier: rectangle package uses box lock, irregular/vacuum/transparent bags use AI shape lock -->
@@ -988,8 +989,8 @@
           <div class="form-row">
             <label for="removeMode">제거 방식</label>
             <select id="removeMode">
-              <option value="ai_foreground" selected>AI 피사체 인식 · 기본 권장</option>
-              <option value="background_only">배경만 제거 · 빠른 처리용</option>
+              <option value="ai_foreground" selected>AI 피사체 인식 · 상품/음식 사진 권장</option>
+              <option value="background_only">배경만 제거 · 단색 배경 전용</option>
             </select>
           </div>
 
@@ -997,8 +998,8 @@
             <label for="qualitySelect">처리 품질</label>
             <select id="qualitySelect">
               <option value="fast">빠름</option>
-              <option value="standard" selected>표준 · 권장</option>
-              <option value="high">고품질 · 느릴 수 있음</option>
+              <option value="standard">표준</option>
+              <option value="high" selected>고품질 · 정확도 우선</option>
             </select>
           </div>
 
@@ -1024,9 +1025,9 @@
           <div class="form-row" id="modelRow">
             <label for="modelSelect">AI 모델 품질</label>
             <select id="modelSelect">
-              <option value="isnet_fp16" selected>표준 품질 · 권장</option>
+              <option value="isnet_fp16">표준 품질</option>
               <option value="isnet_quint8">빠른 처리 · 가벼운 모델</option>
-              <option value="isnet">고품질 · 느릴 수 있음</option>
+              <option value="isnet" selected>고품질 · 정확도 우선</option>
             </select>
           </div>
 
@@ -2293,6 +2294,12 @@
       // v7.8: 흰 포장지 모서리가 바깥 배경과 연결되어 "열린 구멍"처럼 뚫리는 현상을 보정합니다.
       // 닫힌 구멍(fillEnclosedHoles)만으로는 복구되지 않는 상단/측면 모서리 결손을
       // 상품 패키지 내부 윤곽(envelope) 기준으로 먼저 보호합니다.
+      if (looksLikeNonWhiteSceneBackground(data, width, height)) {
+        // v8.7: 회색/베이지 테이블 배경 사진은 색상 flood-fill 방식으로는 누끼가 불가능합니다.
+        // 빠른 모드를 선택해도 AI 피사체 인식으로 자동 전환합니다.
+        return runAiForegroundMode(originalFile, null);
+      }
+
       const catalogBox = getCatalogPackageBounds(data, width, height);
       const softTransparentPackage = looksLikeSoftTransparentPackage(data, width, height, null, colorAlpha, catalogBox);
       if (softTransparentPackage) {
@@ -4142,6 +4149,176 @@
       return alphaArr;
     }
 
+
+    // v8.7: 일반 푸드/접시 사진 판정.
+    // 패키지 상품처럼 흰 포장지를 보호하려고 colorAlpha와 박스/봉투 보호 마스크를 합치면,
+    // 회색 테이블·종이 배경 같은 실제 배경까지 피사체로 살아납니다.
+    // 접시/음식 사진은 AI 마스크를 우선하고 패키지 전용 보호 로직을 완전히 건너뜁니다.
+    function looksLikeNaturalFoodOrDishPhoto(data, width, height, aiAlphaArr, colorAlpha, catalogBox) {
+      const total = width * height;
+      if (!data || !aiAlphaArr || total < 4096) return false;
+
+      const bg = estimateBackgroundColor(data, width, height);
+      let aiCount = 0;
+      let aiMinX = width, aiMinY = height, aiMaxX = -1, aiMaxY = -1;
+      let outsideAi = 0;
+      let outsideLowChromaSceneBg = 0;
+      let outsidePureWhite = 0;
+      let printLike = 0;
+      let pureBrandRedBlue = 0;
+      let foodWarm = 0;
+      let plateNeutral = 0;
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 420));
+      for (let y = 0; y < height; y += step) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x += step) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          if (data[p + 3] < 8) continue;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const dist = colorDistance(r, g, b, bg);
+          const edge = edgeScore(i, x, y, brightness);
+          const ai = aiAlphaArr[i] >= 64;
+
+          if (ai) {
+            aiCount++;
+            if (x < aiMinX) aiMinX = x;
+            if (x > aiMaxX) aiMaxX = x;
+            if (y < aiMinY) aiMinY = y;
+            if (y > aiMaxY) aiMaxY = y;
+            if (r >= 125 && g >= 55 && g <= 185 && b <= 165 && r > b + 18) foodWarm++;
+            if (brightness >= 145 && brightness <= 238 && chroma <= 48 && edge >= 6) plateNeutral++;
+          } else {
+            outsideAi++;
+            if (brightness >= 105 && brightness <= 244 && chroma <= 28 && dist >= 6) outsideLowChromaSceneBg++;
+            if (brightness >= 248 && chroma <= 10) outsidePureWhite++;
+          }
+
+          const brandRed = r >= 160 && g <= 100 && b <= 110 && r > g + 55 && r > b + 55;
+          const brandBlue = b >= 120 && r <= 120 && b > g + 10 && b > r + 35;
+          const darkInk = brightness <= 95 && edge >= 45;
+          if (brandRed || brandBlue) pureBrandRedBlue++;
+          if ((brandRed || brandBlue || darkInk) && edge >= 18) printLike++;
+        }
+      }
+
+      const sampledTotal = Math.ceil(height / step) * Math.ceil(width / step);
+      const aiRatio = aiCount / Math.max(1, sampledTotal);
+      const outsideSceneRatio = outsideLowChromaSceneBg / Math.max(1, outsideAi);
+      const outsideWhiteRatio = outsidePureWhite / Math.max(1, outsideAi);
+      const printRatio = printLike / Math.max(1, sampledTotal);
+      const brandRatio = pureBrandRedBlue / Math.max(1, sampledTotal);
+      const foodRatio = foodWarm / Math.max(1, aiCount);
+      const plateRatio = plateNeutral / Math.max(1, aiCount);
+      const aiW = aiMaxX >= aiMinX ? (aiMaxX - aiMinX + 1) : 0;
+      const aiH = aiMaxY >= aiMinY ? (aiMaxY - aiMinY + 1) : 0;
+      const aiBoxRatio = (aiW * aiH) / Math.max(1, total);
+
+      const sceneBackground = outsideSceneRatio >= 0.16 && outsideWhiteRatio <= 0.90;
+      const subjectLooksFoodOrPlate = foodRatio >= 0.08 || plateRatio >= 0.12;
+      const notPrintedPackage = printRatio < 0.038 && brandRatio < 0.028;
+      const compactAiSubject = aiRatio >= 0.08 && aiRatio <= 0.80 && aiBoxRatio >= 0.10 && aiBoxRatio <= 0.92;
+
+      return compactAiSubject && sceneBackground && subjectLooksFoodOrPlate && notPrintedPackage;
+    }
+
+    // v8.7: AI 전경 마스크를 자연식품/접시 사진에 맞게 정리합니다.
+    // 패키지 보호 로직을 합치지 않고, AI가 분리한 피사체만 사용합니다.
+    function refineNaturalPhotoForegroundAlpha(data, width, height, aiAlphaArr) {
+      const total = width * height;
+      const finalAlpha = new Uint8Array(total);
+      for (let i = 0; i < total; i++) {
+        const a = aiAlphaArr[i];
+        if (a <= 14) finalAlpha[i] = 0;
+        else if (a >= 108) finalAlpha[i] = 255;
+        else finalAlpha[i] = Math.round(((a - 14) / 94) * 255);
+      }
+      fillEnclosedHoles(finalAlpha, width, height);
+      removeSmallAlphaIslands(finalAlpha, width, height, Math.max(18, Math.round(total * 0.00035)));
+      return finalAlpha;
+    }
+
+    function removeSmallAlphaIslands(alphaArr, width, height, minArea) {
+      const total = width * height;
+      const visited = new Uint8Array(total);
+      const queue = [];
+      const component = [];
+      for (let start = 0; start < total; start++) {
+        if (visited[start] || alphaArr[start] < 24) continue;
+        queue.length = 0;
+        component.length = 0;
+        let head = 0;
+        visited[start] = 1;
+        queue.push(start);
+        component.push(start);
+        while (head < queue.length) {
+          const index = queue[head++];
+          const x = index % width;
+          const y = Math.floor(index / width);
+          if (x > 0) { const n = index - 1; if (!visited[n] && alphaArr[n] >= 24) { visited[n] = 1; queue.push(n); component.push(n); } }
+          if (x < width - 1) { const n = index + 1; if (!visited[n] && alphaArr[n] >= 24) { visited[n] = 1; queue.push(n); component.push(n); } }
+          if (y > 0) { const n = index - width; if (!visited[n] && alphaArr[n] >= 24) { visited[n] = 1; queue.push(n); component.push(n); } }
+          if (y < height - 1) { const n = index + width; if (!visited[n] && alphaArr[n] >= 24) { visited[n] = 1; queue.push(n); component.push(n); } }
+        }
+        if (component.length < minArea) {
+          for (const index of component) alphaArr[index] = 0;
+        }
+      }
+      return alphaArr;
+    }
+
+    // v8.7: 빠른 색상 모드에서도 일반 사진 배경은 색상으로 제거할 수 없으므로 AI 모드로 자동 전환합니다.
+    function looksLikeNonWhiteSceneBackground(data, width, height) {
+      const total = width * height;
+      if (!data || total < 4096) return false;
+      let borderWhite = 0, borderCount = 0, innerLowChroma = 0, innerCount = 0, vividPrint = 0;
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 360));
+      const border = Math.max(3, Math.round(Math.min(width, height) * 0.05));
+      for (let y = 0; y < height; y += step) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x += step) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const isBorder = x < border || x >= width - border || y < border || y >= height - border;
+          if (isBorder) {
+            borderCount++;
+            if (brightness >= 245 && chroma <= 14) borderWhite++;
+          } else {
+            innerCount++;
+            if (brightness >= 120 && brightness <= 244 && chroma <= 28) innerLowChroma++;
+            if ((r >= 160 && g <= 105 && b <= 115) || (b >= 130 && r <= 130 && b > r + 35)) vividPrint++;
+          }
+        }
+      }
+      const borderWhiteRatio = borderWhite / Math.max(1, borderCount);
+      const innerLowChromaRatio = innerLowChroma / Math.max(1, innerCount);
+      const vividPrintRatio = vividPrint / Math.max(1, innerCount);
+      return borderWhiteRatio >= 0.50 && innerLowChromaRatio >= 0.22 && vividPrintRatio < 0.08;
+    }
+
     async function rebuildPngWithOriginalColor(originalFile, maskBlob, outputScale = 1) {
       const [originalImage, maskImage] = await Promise.all([
         blobToImage(originalFile),
@@ -4201,9 +4378,15 @@
 
       const catalogBox = getCatalogPackageBounds(originalData.data, width, height);
       const softTransparentPackage = looksLikeSoftTransparentPackage(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox);
+      const naturalFoodOrDishPhoto = looksLikeNaturalFoodOrDishPhoto(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox);
 
       let finalAlpha;
-      if (softTransparentPackage) {
+      if (naturalFoodOrDishPhoto) {
+        // v8.7: 명란/접시 사진처럼 회색 테이블 배경이 있는 일반 푸드 사진은
+        // 패키지 보호 마스크와 colorAlpha 합집합을 쓰면 배경까지 살아납니다.
+        // 이 유형은 AI 마스크만 정리해서 사용합니다.
+        finalAlpha = refineNaturalPhotoForegroundAlpha(originalData.data, width, height, aiAlphaArr);
+      } else if (softTransparentPackage) {
         // v8.5: 크래미 1kg/대파 진공팩 같은 투명 비닐형 상품.
         // 넓은 보호마스크와 박스 잠금은 흰 배경 카드를 남기므로 금지합니다.
         // AI 마스크를 우선하고 색상 보정은 강한 식품/인쇄/비닐 엣지에만 제한합니다.
