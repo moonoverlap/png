@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v8.6 no artificial outline: protect subject without drawing rectangular/stroke envelopes -->
+  <!-- v8.5 soft-pack AI-first: transparent/vacuum/irregular packages bypass broad box/envelope protection -->
   <!-- v8.4 hybrid shape classifier: rectangle package uses box lock, irregular/vacuum/transparent bags use AI shape lock -->
   <!-- v8.4 hybrid shape classifier: final product bounding-box alpha lock removes outer white card and fills internal holes -->
   <!-- v8.2 structural envelope trim: removes closed outer white card residues after package protection -->
   <!-- v8.1 outer white trim: tested on 7 catalog package images, locks full product surface to prevent transparent holes -->
   <!-- v7.9 pale package surface lock: preserves very light beige/white package paper areas -->
-  <meta name="app-version" content="v84-hybrid-shape-classifier">
+  <meta name="app-version" content="v86-no-artificial-outline">
   <!-- v7.8 corner hole repair: open-corner notch fill + product package envelope protect -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
@@ -15,7 +17,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Remover Studio · 이미지 툴킷</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="description" content="배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화를 한 곳에서 배치로 처리하는 웹앱" />
+  <meta name="description" content="배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화까지 한 곳에서 여러 장을 한 번에!" />
   <meta name="theme-color" content="#295BFF" />
   <style>
     :root {
@@ -2291,19 +2293,29 @@
       // v7.8: 흰 포장지 모서리가 바깥 배경과 연결되어 "열린 구멍"처럼 뚫리는 현상을 보정합니다.
       // 닫힌 구멍(fillEnclosedHoles)만으로는 복구되지 않는 상단/측면 모서리 결손을
       // 상품 패키지 내부 윤곽(envelope) 기준으로 먼저 보호합니다.
-      const productProtectMask = buildProductPackageProtectMask(data, width, height, null, colorAlpha);
-      mergeProtectMask(productProtectMask, buildPalePackageSurfaceProtectMask(data, width, height, null, colorAlpha));
-      mergeProtectMask(productProtectMask, buildTestedProductEnvelopeProtectMask(data, width, height, null, colorAlpha));
-      applyProductProtectAlpha(colorAlpha, productProtectMask);
-      sealProductCornerNotches(colorAlpha, width, height, productProtectMask);
-      fillEnclosedHoles(colorAlpha, width, height);
-      // v8.1: 보호 마스크가 바깥 흰 여백까지 끌고 들어온 경우,
-      // 이미지 가장자리와 연결된 순백/저채도 배경 잔여물을 마지막에 다시 제거합니다.
-      trimOuterWhiteBackgroundResidue(colorAlpha, data, width, height);
-      // v8.2: 외곽 배경이 '닫힌 흰 카드'처럼 남는 경우, 상품 구조 윤곽 밖은 마지막에 제거합니다.
-      trimOutsideStructuralProductEnvelope(colorAlpha, data, width, height, null);
-      // v8.3: 카탈로그 상품은 최종 상품 박스 기준으로 내부를 완전히 잠그고 바깥 흰 배경을 제거합니다.
-      applyCatalogPackageBoxLock(colorAlpha, data, width, height);
+      const catalogBox = getCatalogPackageBounds(data, width, height);
+      const softTransparentPackage = looksLikeSoftTransparentPackage(data, width, height, null, colorAlpha, catalogBox);
+      if (softTransparentPackage) {
+        // v8.5: 빠른 모드에서도 투명 비닐형 상품에는 넓은 박스/보호마스크를 적용하지 않습니다.
+        trimEdgeConnectedCanvasWhite(colorAlpha, data, width, height);
+        suppressArtificialEnvelopeEdges(colorAlpha, data, width, height);
+        fillEnclosedHoles(colorAlpha, width, height);
+      } else {
+        const productProtectMask = buildProductPackageProtectMask(data, width, height, null, colorAlpha);
+        mergeProtectMask(productProtectMask, buildPalePackageSurfaceProtectMask(data, width, height, null, colorAlpha));
+        mergeProtectMask(productProtectMask, buildTestedProductEnvelopeProtectMask(data, width, height, null, colorAlpha));
+        applyProductProtectAlpha(colorAlpha, productProtectMask);
+        sealProductCornerNotches(colorAlpha, width, height, productProtectMask);
+        fillEnclosedHoles(colorAlpha, width, height);
+        // v8.1: 보호 마스크가 바깥 흰 여백까지 끌고 들어온 경우,
+        // 이미지 가장자리와 연결된 순백/저채도 배경 잔여물을 마지막에 다시 제거합니다.
+        trimOuterWhiteBackgroundResidue(colorAlpha, data, width, height);
+        // v8.2: 외곽 배경이 '닫힌 흰 카드'처럼 남는 경우, 상품 구조 윤곽 밖은 마지막에 제거합니다.
+        trimOutsideStructuralProductEnvelope(colorAlpha, data, width, height, null);
+        // v8.3: 카탈로그 상품은 최종 상품 박스 기준으로 내부를 완전히 잠그고 바깥 흰 배경을 제거합니다.
+        applyCatalogPackageBoxLock(colorAlpha, data, width, height);
+        suppressArtificialEnvelopeEdges(colorAlpha, data, width, height);
+      }
       const total = width * height;
 
       for (let i = 0; i < total; i++) {
@@ -3779,19 +3791,99 @@
         return alphaArr;
       }
 
+      // v8.6 핵심 수정:
+      // 이전 v8.3~v8.5는 box 내부를 전부 alpha=255로 채웠습니다.
+      // 그 방식은 흰 포장지는 보호하지만, 실제 피사체가 아닌 흰 카드/회색 테두리까지
+      // 새 외곽선처럼 살아나는 부작용을 만들었습니다.
+      // 이제 이 함수는 '박스 채우기'가 아니라 '박스 밖 배경 제거'만 수행합니다.
+      // 즉, 이미 계산된 AI/색상/보호 마스크의 피사체 모양은 절대 사각형으로 덮어쓰지 않습니다.
+      const trimPad = Math.max(1, Math.round(Math.min(width, height) * 0.0015));
+      const minX = Math.max(0, box.minX - trimPad);
+      const minY = Math.max(0, box.minY - trimPad);
+      const maxX = Math.min(width - 1, box.maxX + trimPad);
+      const maxY = Math.min(height - 1, box.maxY + trimPad);
+
       for (let y = 0; y < height; y++) {
         const rowOffset = y * width;
-        const insideY = y >= box.minY && y <= box.maxY;
+        const insideY = y >= minY && y <= maxY;
         for (let x = 0; x < width; x++) {
           const i = rowOffset + x;
-          if (insideY && x >= box.minX && x <= box.maxX) {
-            alphaArr[i] = 255;
-          } else {
-            alphaArr[i] = 0;
-          }
+          if (!insideY || x < minX || x > maxX) alphaArr[i] = 0;
         }
       }
 
+      // 박스 안쪽까지 끌려 들어온 바깥 흰 배경은 제거하되,
+      // 피사체 내부의 흰 라벨/아이보리 포장/비닐 하이라이트는 edge나 인쇄 신호가 있어 보존됩니다.
+      trimEdgeConnectedCanvasWhite(alphaArr, data, width, height);
+      suppressArtificialEnvelopeEdges(alphaArr, data, width, height);
+      return alphaArr;
+    }
+
+    function suppressArtificialEnvelopeEdges(alphaArr, data, width, height) {
+      // v8.6: 보호 마스크/박스 트림 때문에 생기는 1~3px짜리 직선형 회색/흰 외곽선 제거.
+      // 원본 색을 바꾸거나 선을 그리지 않고, 투명 배경과 직접 맞닿은 '저채도 직선 잔여물'만 지웁니다.
+      const total = width * height;
+      if (!alphaArr || !data || total <= 0) return alphaArr;
+      const bg = estimateBackgroundColor(data, width, height);
+      const remove = new Uint8Array(total);
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+      function hasTransparentNeighbor(index, x, y) {
+        return (x > 0 && alphaArr[index - 1] < 8) ||
+          (x < width - 1 && alphaArr[index + 1] < 8) ||
+          (y > 0 && alphaArr[index - width] < 8) ||
+          (y < height - 1 && alphaArr[index + width] < 8);
+      }
+      function lineLikeNeighborCount(index, x, y) {
+        let c = 0;
+        if (x > 0 && alphaArr[index - 1] >= 8) c++;
+        if (x < width - 1 && alphaArr[index + 1] >= 8) c++;
+        if (y > 0 && alphaArr[index - width] >= 8) c++;
+        if (y < height - 1 && alphaArr[index + width] >= 8) c++;
+        return c;
+      }
+
+      for (let y = 1; y < height - 1; y++) {
+        const rowOffset = y * width;
+        for (let x = 1; x < width - 1; x++) {
+          const i = rowOffset + x;
+          if (alphaArr[i] < 8 || !hasTransparentNeighbor(i, x, y)) continue;
+          const p = i * 4;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const dist = colorDistance(r, g, b, bg);
+          const edge = edgeScore(i, x, y, brightness);
+          const neighbors = lineLikeNeighborCount(i, x, y);
+
+          // 식품/인쇄/컬러 포장지는 절대 제거하지 않습니다.
+          const strongSubject = chroma >= 28 || brightness <= 226 || dist >= 34;
+          if (strongSubject) continue;
+
+          // 바깥 배경에서 딸려온 회색 박스선/흰 카드잔여물만 제거합니다.
+          const neutralHalo = brightness >= 226 && chroma <= 18 && dist <= 30;
+          const thinEdgeResidue = neutralHalo && edge <= 38 && neighbors <= 3;
+          if (thinEdgeResidue) remove[i] = 1;
+        }
+      }
+
+      for (let i = 0; i < total; i++) {
+        if (remove[i]) alphaArr[i] = 0;
+      }
       return alphaArr;
     }
 
@@ -3829,6 +3921,225 @@
       }
 
       return pass2;
+    }
+
+
+    // v8.5: 투명 비닐/진공팩/비정형 상품 판정.
+    // 이 유형은 흰 배경과 반투명 포장지가 섞여 있어 박스 잠금/넓은 보호마스크를 걸면
+    // 상품 바깥 흰 카드가 통째로 살아납니다. 따라서 AI 마스크를 우선하고, 색상 보정은
+    // 인쇄/식품/강한 플라스틱 엣지에만 제한합니다.
+    function looksLikeSoftTransparentPackage(data, width, height, aiAlphaArr, colorAlpha, catalogBox) {
+      const box = catalogBox || getCatalogPackageBounds(data, width, height);
+      if (!box) return false;
+
+      const bg = estimateBackgroundColor(data, width, height);
+      const boxW = box.maxX - box.minX + 1;
+      const boxH = box.maxY - box.minY + 1;
+      const boxArea = Math.max(1, boxW * boxH);
+      const strip = Math.max(3, Math.round(Math.min(boxW, boxH) * 0.035));
+
+      function brightnessAt(x, y) {
+        const p = (y * width + x) * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(x, y, brightness) {
+        const lx = x > 0 ? brightnessAt(x - 1, y) : brightness;
+        const rx = x < width - 1 ? brightnessAt(x + 1, y) : brightness;
+        const ty = y > 0 ? brightnessAt(x, y - 1) : brightness;
+        const by = y < height - 1 ? brightnessAt(x, y + 1) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+      function pixelStats(x, y) {
+        const p = (y * width + x) * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const chroma = maxC - minC;
+        const brightness = (r + g + b) / 3;
+        const dist = colorDistance(r, g, b, bg);
+        const edge = edgeScore(x, y, brightness);
+        return { r, g, b, chroma, brightness, dist, edge };
+      }
+
+      let nearWhiteLowSignal = 0;
+      let stripCount = 0;
+      let strongPrintOrFood = 0;
+      let translucentSignal = 0;
+      let aiStrong = 0;
+      let aiBoxCount = 0;
+      let veryWhiteInterior = 0;
+      let interiorCount = 0;
+
+      function scanRegion(x0, y0, x1, y1, isStrip) {
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const i = y * width + x;
+            const s = pixelStats(x, y);
+            if (data[i * 4 + 3] < 8) continue;
+            if (isStrip) {
+              stripCount++;
+              if (s.brightness >= 238 && s.chroma <= 22 && s.edge <= 28) nearWhiteLowSignal++;
+              if (s.brightness >= 220 && s.brightness <= 252 && s.chroma <= 34 && s.edge >= 10 && s.edge <= 60) translucentSignal++;
+            } else {
+              interiorCount++;
+              if (s.brightness >= 244 && s.chroma <= 18) veryWhiteInterior++;
+            }
+            if (s.chroma >= 28 || s.brightness <= 220 || s.dist >= 30) strongPrintOrFood++;
+            if (aiAlphaArr) {
+              aiBoxCount++;
+              if (aiAlphaArr[i] >= 96) aiStrong++;
+            }
+          }
+        }
+      }
+
+      scanRegion(box.minX, box.minY, box.maxX, Math.min(box.maxY, box.minY + strip - 1), true);
+      scanRegion(box.minX, Math.max(box.minY, box.maxY - strip + 1), box.maxX, box.maxY, true);
+      scanRegion(box.minX, box.minY, Math.min(box.maxX, box.minX + strip - 1), box.maxY, true);
+      scanRegion(Math.max(box.minX, box.maxX - strip + 1), box.minY, box.maxX, box.maxY, true);
+      scanRegion(box.minX, box.minY, box.maxX, box.maxY, false);
+
+      const paleEdgeRatio = stripCount ? nearWhiteLowSignal / stripCount : 0;
+      const translucentRatio = stripCount ? translucentSignal / stripCount : 0;
+      const strongRatio = strongPrintOrFood / boxArea;
+      const aiStrongRatio = aiBoxCount ? aiStrong / aiBoxCount : 0;
+      const whiteInteriorRatio = interiorCount ? veryWhiteInterior / interiorCount : 0;
+
+      const decision = getPackageShapeDecision(data, width, height, box);
+      const alreadyIrregular = decision && !decision.useBoxLock;
+
+      // 진공팩/투명비닐의 특징:
+      // - 외곽 스트립이 대부분 밝고 저채도이며, 강한 인쇄 테두리가 적음
+      // - 안쪽에 흰/반투명 영역이 많음
+      // - AI가 보는 전경 비율이 박스 전체보다 작음
+      // - 또는 기존 shape classifier가 irregular로 판정함
+      return alreadyIrregular || (
+        paleEdgeRatio >= 0.58 &&
+        whiteInteriorRatio >= 0.24 &&
+        strongRatio >= 0.015 &&
+        (aiStrongRatio === 0 || aiStrongRatio < 0.88 || translucentRatio >= 0.10)
+      );
+    }
+
+    function buildStrongStructureAlpha(data, width, height, baseAlphaArr, aiAlphaArr, colorAlpha) {
+      const total = width * height;
+      const bg = estimateBackgroundColor(data, width, height);
+      const out = new Uint8Array(total);
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScoreFromIndex(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+
+      for (let y = 0; y < height; y++) {
+        const rowOffset = y * width;
+        for (let x = 0; x < width; x++) {
+          const i = rowOffset + x;
+          const p = i * 4;
+          const a = data[p + 3];
+          if (a < 8) { out[i] = 0; continue; }
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const chroma = maxC - minC;
+          const brightness = (r + g + b) / 3;
+          const dist = colorDistance(r, g, b, bg);
+          const edge = edgeScoreFromIndex(i, x, y, brightness);
+          const ai = aiAlphaArr ? aiAlphaArr[i] : 0;
+          const base = baseAlphaArr ? baseAlphaArr[i] : ai;
+          const colorA = colorAlpha ? colorAlpha[i] : 0;
+
+          const pureCanvasWhite = brightness >= 250 && chroma <= 10 && dist <= 16 && edge <= 14;
+          const strongPrintFoodOrVeg = chroma >= 24 || brightness <= 228 || dist >= 28;
+          const plasticEdge = brightness >= 214 && brightness <= 252 && chroma <= 36 && edge >= 18 && dist >= 5;
+          const keepByColor = colorA >= 180 && (strongPrintFoodOrVeg || plasticEdge) && !pureCanvasWhite;
+          const keepAlpha = Math.max(base, keepByColor ? Math.min(255, Math.max(160, colorA)) : 0);
+          out[i] = keepAlpha;
+        }
+      }
+
+      return out;
+    }
+
+    function trimEdgeConnectedCanvasWhite(alphaArr, data, width, height) {
+      const total = width * height;
+      const bg = estimateBackgroundColor(data, width, height);
+      const visited = new Uint8Array(total);
+      const queue = new Int32Array(total);
+      let head = 0;
+      let tail = 0;
+
+      function brightnessAtIndex(index) {
+        const p = index * 4;
+        return (data[p] + data[p + 1] + data[p + 2]) / 3;
+      }
+      function edgeScore(index, x, y, brightness) {
+        const lx = x > 0 ? brightnessAtIndex(index - 1) : brightness;
+        const rx = x < width - 1 ? brightnessAtIndex(index + 1) : brightness;
+        const ty = y > 0 ? brightnessAtIndex(index - width) : brightness;
+        const by = y < height - 1 ? brightnessAtIndex(index + width) : brightness;
+        return Math.abs(rx - lx) + Math.abs(by - ty);
+      }
+      function isCanvasWhiteCandidate(index) {
+        if (index < 0 || index >= total) return false;
+        const p = index * 4;
+        if (data[p + 3] < 8) return true;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const chroma = maxC - minC;
+        const brightness = (r + g + b) / 3;
+        const dist = colorDistance(r, g, b, bg);
+        const x = index % width;
+        const y = Math.floor(index / width);
+        const edge = edgeScore(index, x, y, brightness);
+        // 플라스틱 주름/하이라이트는 edge가 남기 때문에 제외하고,
+        // 실제 캔버스 흰 배경처럼 변화가 거의 없는 픽셀만 제거합니다.
+        return brightness >= 248 && chroma <= 12 && dist <= 18 && edge <= 16;
+      }
+      function enqueue(index) {
+        if (index < 0 || index >= total || visited[index]) return;
+        if (!isCanvasWhiteCandidate(index)) return;
+        visited[index] = 1;
+        queue[tail++] = index;
+      }
+
+      for (let x = 0; x < width; x++) {
+        enqueue(x);
+        enqueue((height - 1) * width + x);
+      }
+      for (let y = 0; y < height; y++) {
+        enqueue(y * width);
+        enqueue(y * width + width - 1);
+      }
+
+      while (head < tail) {
+        const i = queue[head++];
+        const x = i % width;
+        const y = Math.floor(i / width);
+        if (x > 0) enqueue(i - 1);
+        if (x < width - 1) enqueue(i + 1);
+        if (y > 0) enqueue(i - width);
+        if (y < height - 1) enqueue(i + width);
+      }
+
+      for (let i = 0; i < total; i++) {
+        if (visited[i]) alphaArr[i] = 0;
+      }
+      return alphaArr;
     }
 
     async function rebuildPngWithOriginalColor(originalFile, maskBlob, outputScale = 1) {
@@ -3888,28 +4199,39 @@
       // 이렇게 해야 바깥 경계는 색상 판정이 결정하고, 글자 사이 등 내부는 AI가 지켜줍니다.
       const aiErodedArr = erodeAlpha(aiAlphaArr, width, height, AI_ERODE_RADIUS);
 
-      // 합집합: AI와 색상 판정 중 하나라도 "전경"이라고 보면 보존합니다.
-      // AI가 놓친 흰 영역은 색상 쪽이, 색상이 뚫어버린 글자 사이는 AI 쪽이 막아줍니다.
-      const finalAlpha = new Uint8Array(total);
-      for (let i = 0; i < total; i++) {
-        finalAlpha[i] = Math.max(aiErodedArr[i], colorAlpha[i]);
+      const catalogBox = getCatalogPackageBounds(originalData.data, width, height);
+      const softTransparentPackage = looksLikeSoftTransparentPackage(originalData.data, width, height, aiAlphaArr, colorAlpha, catalogBox);
+
+      let finalAlpha;
+      if (softTransparentPackage) {
+        // v8.5: 크래미 1kg/대파 진공팩 같은 투명 비닐형 상품.
+        // 넓은 보호마스크와 박스 잠금은 흰 배경 카드를 남기므로 금지합니다.
+        // AI 마스크를 우선하고 색상 보정은 강한 식품/인쇄/비닐 엣지에만 제한합니다.
+        finalAlpha = buildStrongStructureAlpha(originalData.data, width, height, aiErodedArr, aiAlphaArr, colorAlpha);
+        fillEnclosedHoles(finalAlpha, width, height);
+        trimEdgeConnectedCanvasWhite(finalAlpha, originalData.data, width, height);
+        suppressArtificialEnvelopeEdges(finalAlpha, originalData.data, width, height);
+      } else {
+        // 합집합: AI와 색상 판정 중 하나라도 "전경"이라고 보면 보존합니다.
+        // AI가 놓친 흰 영역은 색상 쪽이, 색상이 뚫어버린 글자 사이는 AI 쪽이 막아줍니다.
+        finalAlpha = new Uint8Array(total);
+        for (let i = 0; i < total; i++) {
+          finalAlpha[i] = Math.max(aiErodedArr[i], colorAlpha[i]);
+        }
+
+        // v7.8~v8.4: 네모/인쇄형 상품 패키지 전용 보호.
+        const productProtectMask = buildProductPackageProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha);
+        mergeProtectMask(productProtectMask, buildPalePackageSurfaceProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha));
+        mergeProtectMask(productProtectMask, buildTestedProductEnvelopeProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha));
+        applyProductProtectAlpha(finalAlpha, productProtectMask);
+        sealProductCornerNotches(finalAlpha, width, height, productProtectMask);
+
+        fillEnclosedHoles(finalAlpha, width, height);
+        trimOuterWhiteBackgroundResidue(finalAlpha, originalData.data, width, height);
+        trimOutsideStructuralProductEnvelope(finalAlpha, originalData.data, width, height, aiAlphaArr);
+        applyCatalogPackageBoxLock(finalAlpha, originalData.data, width, height);
+        suppressArtificialEnvelopeEdges(finalAlpha, originalData.data, width, height);
       }
-
-      // v7.8: 상품 패키지의 흰 모서리/흰 라벨이 외부 흰 배경과 연결되어 열린 구멍으로 뚫리는 문제 보정.
-      const productProtectMask = buildProductPackageProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha);
-      mergeProtectMask(productProtectMask, buildPalePackageSurfaceProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha));
-      mergeProtectMask(productProtectMask, buildTestedProductEnvelopeProtectMask(originalData.data, width, height, aiAlphaArr, colorAlpha));
-      applyProductProtectAlpha(finalAlpha, productProtectMask);
-      sealProductCornerNotches(finalAlpha, width, height, productProtectMask);
-
-      // 가장자리와 이어지지 않은 채 뚫린 구멍은 배경일 수 없으므로 메웁니다.
-      fillEnclosedHoles(finalAlpha, width, height);
-      // v8.1: 외곽 보호가 과하게 잡힌 경우 남는 흰 배경 띠를 최종 제거합니다.
-      trimOuterWhiteBackgroundResidue(finalAlpha, originalData.data, width, height);
-      // v8.2: 보호 마스크가 만든 외곽 흰 카드/여백은 AI+인쇄 구조 윤곽 기준으로 제거합니다.
-      trimOutsideStructuralProductEnvelope(finalAlpha, originalData.data, width, height, aiAlphaArr);
-      // v8.3: Photoroom 기준 이미지처럼 상품 박스 밖의 흰 배경은 제거하고, 박스 내부 흰 포장/라벨은 보존합니다.
-      applyCatalogPackageBoxLock(finalAlpha, originalData.data, width, height);
 
       for (let i = 0; i < maskData.data.length; i += 4) {
         const pixelIndex = i / 4;
