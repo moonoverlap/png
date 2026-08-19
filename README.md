@@ -42,3 +42,10 @@ http://localhost:5173
 - `buildTestedProductEnvelopeProtectMask()` 추가
 - 흰/아이보리/반투명 포장 표면과 라벨을 상품 외곽 안에서 통째로 보호
 - ZIP 업로드 방지를 위해 `.gitignore`에 `*.zip` 유지
+
+
+## v8.1 외곽 흰 배경 잔여물 제거
+
+- 상품 패키지 보호 마스크 이후 바깥쪽 순백 여백이 남는 문제 수정
+- `trimOuterWhiteBackgroundResidue()` 추가
+- 내부 흰 라벨/아이보리 포장지는 유지하고 외부 흰 배경만 제거
