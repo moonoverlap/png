@@ -1,3 +1,12 @@
+# v9.2 Trimap + Edge Matting
+
+- 로컬 AI segmentation 결과를 adaptive trimap으로 분리
+- unknown 경계에서 local foreground/background color sampling으로 alpha matte 계산
+- 원본 색상 경계를 따라 edge-aware smoothing 적용
+- 상품별 예외 보정보다 기본 Segmentation + Matting 파이프라인을 우선 사용
+
+---
+
 # Remover studio v4.4
 
 기준일: 2026-08-12
@@ -110,3 +119,11 @@ http://localhost:5173
 - Segmentation과 Matting을 분리한 2단계 구조
 - 상품별 예외 보정은 기본 경로에서 제외
 - `PIPELINE_V90.md` 참고
+
+
+## v91 업데이트
+
+- 사람/의류 사진용 인물 Matting 모드 추가
+- 머리카락, 손, 소매, 가방끈, 종이 태그 같은 얇은 피사체 경계 보존 강화
+- 피사체 유형 선택 옵션 추가
+- API 없이 로컬 Segmentation + Matting 유지

@@ -1,6 +1,8 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <!-- v9.2 trimap-guided edge matting: segmentation confidence -> adaptive trimap -> local alpha matte -> edge-aware refine -->
+  <!-- v9.1 human/person matting mode: portrait and full-body photos bypass product/package rules and preserve hair/clothing edges -->
   <!-- v9.0 local two-stage segmentation + high-resolution matting: API-free default pipeline -->
   <!-- v9.0 API-free mode: local segmentation first, matting second -->
   <!-- v8.9 free RMBG API mode removed from default flow -->
@@ -13,7 +15,7 @@
   <!-- v8.2 structural envelope trim: removes closed outer white card residues after package protection -->
   <!-- v8.1 outer white trim: tested on 7 catalog package images, locks full product surface to prevent transparent holes -->
   <!-- v7.9 pale package surface lock: preserves very light beige/white package paper areas -->
-  <meta name="app-version" content="v90-local-segmentation-matting">
+  <meta name="app-version" content="v92-trimap-edge-matting">
   <!-- v7.8 corner hole repair: open-corner notch fill + product package envelope protect -->
   <!-- v5.0 batch studio: multi-file queue + optional auto-crop, v1.5 removal engine preserved -->
   <!-- v4.4 remover studio title change: engine preserved -->
@@ -917,7 +919,7 @@
     <section class="hero">
       <div class="eyebrow">Image Toolkit · Batch</div>
       <h1>Remover Studio</h1>
-      <p>무료 AI 누끼 서버 연동, 배경 제거, 크기 조절, 포맷 변환, 자르기, 벡터화까지 한 곳에서 여러 장을 한 번에!</p>
+      <p>사람, 상품, 음식 사진까지 API 없이 로컬 AI로 배경 제거. 크기 조절, 포맷 변환, 자르기, 벡터화까지 한 곳에서 여러 장을 한 번에!</p>
     </section>
 
     <nav class="tool-nav" id="toolNav">
@@ -1001,9 +1003,19 @@
           <div class="form-row">
             <label for="engineSelect">누끼 엔진</label>
             <select id="engineSelect">
-              <option value="two_stage_local" selected>로컬 2단계 · Segmentation + Matting</option>
+              <option value="two_stage_local" selected>로컬 2단계 · Segmentation + Trimap Matting</option>
               <option value="local_ai">로컬 AI 원본 마스크 · 보조</option>
               <option value="background_only">단색 배경 빠른 제거 · 보조</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="subjectTypeSelect">피사체 유형</label>
+            <select id="subjectTypeSelect">
+              <option value="auto" selected>자동 감지 · 인물/상품/음식</option>
+              <option value="person">인물/의류 · 머리카락 보호</option>
+              <option value="product">상품/패키지</option>
+              <option value="food">음식/접시</option>
             </select>
           </div>
 <div class="form-row">
@@ -1055,7 +1067,7 @@
             </select>
           </div>
 
-          <p class="notice">v90 기본값은 API 없이 브라우저에서 실행되는 2단계 파이프라인입니다. 1단계에서 AI 세그멘테이션으로 피사체를 잡고, 2단계에서 원본 해상도 기준 Matting으로 경계선을 다시 정제합니다. 상품별 예외 보정은 기본 경로에서 제외됩니다.</p>
+          <p class="notice">v91 기본값은 API 없이 브라우저에서 실행되는 2단계 파이프라인입니다. 사람 사진은 자동으로 인물 모드로 분기해 머리카락, 옷, 손, 가방 끈 같은 얇은 피사체 경계선을 더 보존합니다.</p>
         </div>
 
         <div id="optsResize" class="tool-options">
@@ -1347,6 +1359,7 @@
     const urlFetchBtn = document.getElementById("urlFetchBtn");
     const removeMode = document.getElementById("removeMode");
     const engineSelect = document.getElementById("engineSelect");
+    const subjectTypeSelect = document.getElementById("subjectTypeSelect");
     const qualitySelect = document.getElementById("qualitySelect");
     const sensitivityRow = document.getElementById("sensitivityRow");
     const sensitivitySelect = document.getElementById("sensitivitySelect");
@@ -4509,6 +4522,51 @@
       return alpha;
     }
 
+    // v9.2: @imgly 결과가 foreground PNG일 때는 alpha 채널을 쓰고,
+    // mask PNG/흑백 마스크일 때는 밝기값을 써서 같은 파이프라인으로 처리합니다.
+    function extractSegmentationConfidence(imageData, width, height) {
+      const total = width * height;
+      const out = new Uint8Array(total);
+      let minA = 255, maxA = 0;
+      let minL = 255, maxL = 0;
+      let borderLumaSum = 0, borderCount = 0;
+
+      for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+          const i = row + x;
+          const p = i * 4;
+          const a = imageData.data[p + 3];
+          const l = imageData.data[p] * 0.299 + imageData.data[p + 1] * 0.587 + imageData.data[p + 2] * 0.114;
+          if (a < minA) minA = a;
+          if (a > maxA) maxA = a;
+          if (l < minL) minL = l;
+          if (l > maxL) maxL = l;
+          if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+            borderLumaSum += l;
+            borderCount++;
+          }
+        }
+      }
+
+      const alphaHasMask = maxA - minA > 28 && maxA > 80 && minA < 235;
+      if (alphaHasMask) {
+        for (let i = 0; i < total; i++) out[i] = imageData.data[i * 4 + 3];
+        return out;
+      }
+
+      // Mask 이미지가 불투명 흑백으로 나오는 경우: 일반적으로 전경=흰색, 배경=검정입니다.
+      // 단, 테두리가 밝으면 반전된 마스크로 판단합니다.
+      const borderMean = borderLumaSum / Math.max(1, borderCount);
+      const shouldInvert = borderMean > 180 && (maxL - minL) > 28;
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        const l = imageData.data[p] * 0.299 + imageData.data[p + 1] * 0.587 + imageData.data[p + 2] * 0.114;
+        out[i] = clampByte(shouldInvert ? 255 - l : l);
+      }
+      return out;
+    }
+
     function clampByte(value) {
       return Math.max(0, Math.min(255, Math.round(value || 0)));
     }
@@ -4642,60 +4700,426 @@
       return current;
     }
 
-    function buildMattingAlphaFromSegmentation(data, width, height, segmentationAlpha, quality = "high") {
+
+    // v9.1: 사람/의류 사진 자동 판정.
+    // 상품 패키지 보정처럼 사각 영역을 만들지 않고, AI 세그멘테이션을 주인으로 두며
+    // 머리카락·소매·손·가방끈처럼 얇은 경계가 색상 보정에 먹히지 않도록 matting 값을 조정합니다.
+    function getAlphaSubjectStats(alphaArr, width, height, threshold = 28) {
+      let minX = width, minY = height, maxX = -1, maxY = -1, count = 0;
+      for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+          const i = row + x;
+          if (alphaArr[i] > threshold) {
+            count++;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (!count || maxX < minX || maxY < minY) return null;
+      const boxW = maxX - minX + 1;
+      const boxH = maxY - minY + 1;
+      return { minX, minY, maxX, maxY, boxW, boxH, count, ratio: count / Math.max(1, width * height) };
+    }
+
+    function isSkinLikePixel(r, g, b) {
+      const maxc = Math.max(r, g, b);
+      const minc = Math.min(r, g, b);
+      return r > 88 && g > 42 && b > 28 && r > g + 4 && r > b + 12 && maxc - minc > 18 && maxc < 252;
+    }
+
+    function isHairLikePixel(r, g, b) {
+      const maxc = Math.max(r, g, b);
+      const minc = Math.min(r, g, b);
+      return maxc < 118 && minc < 82 && (r + g + b) < 285 && Math.abs(r - g) < 42;
+    }
+
+    function looksLikeHumanSubject(data, width, height, segmentationAlpha) {
+      const stats = getAlphaSubjectStats(segmentationAlpha, width, height, 36);
+      if (!stats) return false;
+
+      const aspect = stats.boxH / Math.max(1, stats.boxW);
+      const boxAreaRatio = (stats.boxW * stats.boxH) / Math.max(1, width * height);
+      const centerX = (stats.minX + stats.maxX) / 2;
+      const centered = centerX > width * 0.22 && centerX < width * 0.78;
+      const portraitLike = aspect > 1.05 || stats.boxH > height * 0.52;
+
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 360));
+      let subjectCount = 0;
+      let skinCount = 0;
+      let hairCount = 0;
+      let upperSubject = 0;
+      let upperSkin = 0;
+      let printedCatalogSignals = 0;
+
+      const upperLimit = stats.minY + Math.round(stats.boxH * 0.55);
+      for (let y = stats.minY; y <= stats.maxY; y += step) {
+        const row = y * width;
+        for (let x = stats.minX; x <= stats.maxX; x += step) {
+          const i = row + x;
+          if (segmentationAlpha[i] <= 28) continue;
+          const p = i * 4;
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          subjectCount++;
+          if (isSkinLikePixel(r, g, b)) {
+            skinCount++;
+            if (y <= upperLimit) upperSkin++;
+          }
+          if (isHairLikePixel(r, g, b) && y <= upperLimit) hairCount++;
+          if (y <= upperLimit) upperSubject++;
+
+          // 강한 빨강/파랑 인쇄가 과도하면 패키지 가능성이 높습니다.
+          const brandRed = r > 165 && g < 80 && b < 80;
+          const brandBlue = b > 130 && r < 90 && g < 140;
+          if (brandRed || brandBlue) printedCatalogSignals++;
+        }
+      }
+
+      if (!subjectCount) return false;
+      const skinRatio = skinCount / subjectCount;
+      const upperSkinRatio = upperSubject ? upperSkin / upperSubject : 0;
+      const hairRatio = upperSubject ? hairCount / upperSubject : 0;
+      const printRatio = printedCatalogSignals / subjectCount;
+
+      const hasHumanColorStructure = skinRatio > 0.025 || upperSkinRatio > 0.045 || (hairRatio > 0.035 && upperSkinRatio > 0.018);
+      const notCatalogPackage = printRatio < 0.18;
+      return centered && portraitLike && boxAreaRatio > 0.08 && boxAreaRatio < 0.92 && hasHumanColorStructure && notCatalogPackage;
+    }
+
+    // v9.2: 연구 기반 파이프라인 구조
+    // 1) segmentation confidence를 절대값으로 믿지 않고 definite FG/BG seed로 분리
+    // 2) seed 사이를 adaptive trimap unknown band로 설정
+    // 3) unknown band에서 주변 FG/BG 색 샘플을 이용해 alpha compositing 값을 계산
+    // 4) edge-aware smoothing과 작은 pinhole 보정만 수행
+    function makeTrimapSeeds(segmentationAlpha, width, height, humanSubject, quality = "high") {
       const total = width * height;
       const fgSeed = new Uint8Array(total);
       const bgSeed = new Uint8Array(total);
-      const finalAlpha = new Uint8Array(total);
+      const bgCut = humanSubject ? (quality === "fast" ? 10 : 6) : (quality === "fast" ? 14 : 8);
+      const fgCut = humanSubject ? (quality === "fast" ? 214 : 228) : (quality === "fast" ? 224 : 238);
 
-      // Confidence thresholds are intentionally separated.
-      // Segmentation is allowed to be imperfect; Matting owns the boundary band.
-      const bgCut = quality === "fast" ? 18 : 12;
-      const fgCut = quality === "fast" ? 228 : 238;
       for (let i = 0; i < total; i++) {
         const a = segmentationAlpha[i];
         if (a >= fgCut) fgSeed[i] = 1;
         if (a <= bgCut) bgSeed[i] = 1;
       }
 
+      // 가장자리와 연결된 매우 낮은 confidence는 확정 배경으로 강제합니다.
+      const visited = new Uint8Array(total);
+      const queue = [];
+      let head = 0;
+      function enqueue(index) {
+        if (index < 0 || index >= total || visited[index]) return;
+        if (segmentationAlpha[index] > bgCut + 16) return;
+        visited[index] = 1;
+        queue.push(index);
+      }
+      for (let x = 0; x < width; x++) {
+        enqueue(x);
+        enqueue((height - 1) * width + x);
+      }
+      for (let y = 0; y < height; y++) {
+        enqueue(y * width);
+        enqueue(y * width + width - 1);
+      }
+      while (head < queue.length) {
+        const i = queue[head++];
+        const x = i % width;
+        const y = Math.floor(i / width);
+        if (x > 0) enqueue(i - 1);
+        if (x < width - 1) enqueue(i + 1);
+        if (y > 0) enqueue(i - width);
+        if (y < height - 1) enqueue(i + width);
+      }
+      for (let i = 0; i < total; i++) if (visited[i]) bgSeed[i] = 1;
+
+      return { fgSeed, bgSeed, bgCut, fgCut };
+    }
+
+    function sampleLocalFgBgColors(data, width, height, fgSeed, bgSeed, x, y, maxRadius) {
+      let fgR = 0, fgG = 0, fgB = 0, fgW = 0;
+      let bgR = 0, bgG = 0, bgB = 0, bgW = 0;
+      const total = width * height;
+      const step = maxRadius > 12 ? 2 : 1;
+
+      for (let r = 2; r <= maxRadius; r += 2) {
+        fgR = fgG = fgB = fgW = 0;
+        bgR = bgG = bgB = bgW = 0;
+        for (let dy = -r; dy <= r; dy += step) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (let dx = -r; dx <= r; dx += step) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            const ni = ny * width + nx;
+            if (ni < 0 || ni >= total) continue;
+            const p = ni * 4;
+            const w = 1 / (1 + Math.abs(dx) + Math.abs(dy));
+            if (fgSeed[ni]) {
+              fgR += data[p] * w; fgG += data[p + 1] * w; fgB += data[p + 2] * w; fgW += w;
+            }
+            if (bgSeed[ni]) {
+              bgR += data[p] * w; bgG += data[p + 1] * w; bgB += data[p + 2] * w; bgW += w;
+            }
+          }
+        }
+        if (fgW > 0.15 && bgW > 0.15) break;
+      }
+
+      if (fgW <= 0.15 || bgW <= 0.15) return null;
+      return {
+        f: { r: fgR / fgW, g: fgG / fgW, b: fgB / fgW },
+        b: { r: bgR / bgW, g: bgG / bgW, b: bgB / bgW }
+      };
+    }
+
+    function alphaFromLocalColors(r, g, b, f, bg) {
+      const fr = f.r - bg.r;
+      const fg = f.g - bg.g;
+      const fb = f.b - bg.b;
+      const denom = fr * fr + fg * fg + fb * fb;
+      if (denom < 64) return null;
+      const alpha = ((r - bg.r) * fr + (g - bg.g) * fg + (b - bg.b) * fb) / denom;
+      const separation = Math.sqrt(denom);
+      return {
+        alpha: clampByte(alpha * 255),
+        reliability: Math.max(0, Math.min(1, (separation - 8) / 84))
+      };
+    }
+
+    function removeTinyAlphaSpeckles(alphaArr, width, height, minArea) {
+      const total = width * height;
+      const visited = new Uint8Array(total);
+      const queue = [];
+      const comp = [];
+      for (let i = 0; i < total; i++) {
+        if (visited[i] || alphaArr[i] <= 12) continue;
+        queue.length = 0;
+        comp.length = 0;
+        let head = 0;
+        let maxA = 0;
+        visited[i] = 1;
+        queue.push(i);
+        while (head < queue.length) {
+          const cur = queue[head++];
+          comp.push(cur);
+          if (alphaArr[cur] > maxA) maxA = alphaArr[cur];
+          const x = cur % width;
+          const y = Math.floor(cur / width);
+          const neighbors = [];
+          if (x > 0) neighbors.push(cur - 1);
+          if (x < width - 1) neighbors.push(cur + 1);
+          if (y > 0) neighbors.push(cur - width);
+          if (y < height - 1) neighbors.push(cur + width);
+          for (const n of neighbors) {
+            if (!visited[n] && alphaArr[n] > 12) {
+              visited[n] = 1;
+              queue.push(n);
+            }
+          }
+        }
+        if (comp.length < minArea && maxA < 180) {
+          for (const idx of comp) alphaArr[idx] = 0;
+        }
+      }
+      return alphaArr;
+    }
+
+    function fillSmallTransparentPinholes(alphaArr, width, height, maxArea) {
+      const total = width * height;
+      const outside = new Uint8Array(total);
+      const visited = new Uint8Array(total);
+      const queue = [];
+      let head = 0;
+      function enqueueOutside(index) {
+        if (index < 0 || index >= total || outside[index]) return;
+        if (alphaArr[index] >= 96) return;
+        outside[index] = 1;
+        queue.push(index);
+      }
+      for (let x = 0; x < width; x++) {
+        enqueueOutside(x);
+        enqueueOutside((height - 1) * width + x);
+      }
+      for (let y = 0; y < height; y++) {
+        enqueueOutside(y * width);
+        enqueueOutside(y * width + width - 1);
+      }
+      while (head < queue.length) {
+        const i = queue[head++];
+        const x = i % width;
+        const y = Math.floor(i / width);
+        if (x > 0) enqueueOutside(i - 1);
+        if (x < width - 1) enqueueOutside(i + 1);
+        if (y > 0) enqueueOutside(i - width);
+        if (y < height - 1) enqueueOutside(i + width);
+      }
+
+      const comp = [];
+      for (let i = 0; i < total; i++) {
+        if (outside[i] || visited[i] || alphaArr[i] >= 96) continue;
+        queue.length = 0;
+        comp.length = 0;
+        head = 0;
+        let borderTouch = false;
+        visited[i] = 1;
+        queue.push(i);
+        while (head < queue.length) {
+          const cur = queue[head++];
+          comp.push(cur);
+          const x = cur % width;
+          const y = Math.floor(cur / width);
+          if (x === 0 || y === 0 || x === width - 1 || y === height - 1) borderTouch = true;
+          const neighbors = [];
+          if (x > 0) neighbors.push(cur - 1);
+          if (x < width - 1) neighbors.push(cur + 1);
+          if (y > 0) neighbors.push(cur - width);
+          if (y < height - 1) neighbors.push(cur + width);
+          for (const n of neighbors) {
+            if (!outside[n] && !visited[n] && alphaArr[n] < 96) {
+              visited[n] = 1;
+              queue.push(n);
+            }
+          }
+        }
+        if (!borderTouch && comp.length <= maxArea) {
+          for (const idx of comp) alphaArr[idx] = 255;
+        }
+      }
+      return alphaArr;
+    }
+
+    function guidedBoundarySmooth(alphaArr, data, width, height, iterations = 1) {
+      const total = width * height;
+      let current = alphaArr;
+      for (let iter = 0; iter < iterations; iter++) {
+        const next = new Uint8Array(total);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            const a = current[i];
+            if (a <= 2 || a >= 253) { next[i] = a; continue; }
+            const p = i * 4;
+            const r = data[p], g = data[p + 1], b = data[p + 2];
+            let sum = a * 5;
+            let weight = 5;
+            for (let dy = -1; dy <= 1; dy++) {
+              const ny = y + dy;
+              if (ny < 0 || ny >= height) continue;
+              for (let dx = -1; dx <= 1; dx++) {
+                const nx = x + dx;
+                if (nx < 0 || nx >= width || (dx === 0 && dy === 0)) continue;
+                const ni = ny * width + nx;
+                const np = ni * 4;
+                const colorDiff = Math.abs(data[np] - r) + Math.abs(data[np + 1] - g) + Math.abs(data[np + 2] - b);
+                const alphaDiff = Math.abs(current[ni] - a);
+                const w = colorDiff < 30 ? 2.4 : (colorDiff < 70 ? 1.1 : 0.25);
+                const aw = alphaDiff < 80 ? w : w * 0.45;
+                sum += current[ni] * aw;
+                weight += aw;
+              }
+            }
+            next[i] = clampByte(sum / Math.max(1e-6, weight));
+          }
+        }
+        current = next;
+      }
+      return current;
+    }
+
+    function buildMattingAlphaFromSegmentation(data, width, height, segmentationAlpha, quality = "high") {
+      const total = width * height;
+      const finalAlpha = new Uint8Array(total);
+      const subjectMode = subjectTypeSelect?.value || "auto";
+      const humanSubject = subjectMode === "person" || (subjectMode === "auto" && looksLikeHumanSubject(data, width, height, segmentationAlpha));
+      const subjectStats = humanSubject ? getAlphaSubjectStats(segmentationAlpha, width, height, 24) : null;
+      const { fgSeed, bgSeed, bgCut, fgCut } = makeTrimapSeeds(segmentationAlpha, width, height, humanSubject, quality);
       const distFg = distanceTransformToMask(fgSeed, width, height);
       const distBg = distanceTransformToMask(bgSeed, width, height);
       const bgColor = estimateBackgroundColor(data, width, height);
-      const colorTol = quality === "fast" ? 22 : 30;
-      const colorFeather = quality === "high" ? 84 : 64;
+      const baseRadius = Math.max(5, Math.min(22, Math.round(Math.min(width, height) * (humanSubject ? 0.018 : 0.014))));
+      const highQuality = quality === "high";
 
       for (let y = 0; y < height; y++) {
         const row = y * width;
         for (let x = 0; x < width; x++) {
           const i = row + x;
           const raw = segmentationAlpha[i];
-          if (raw <= 3) { finalAlpha[i] = 0; continue; }
-          if (raw >= 252) { finalAlpha[i] = 255; continue; }
+          if (raw <= 1) { finalAlpha[i] = 0; continue; }
+          if (raw >= 254) { finalAlpha[i] = 255; continue; }
 
           const df = distFg[i];
           const db = distBg[i];
           const geo = (db / Math.max(1, df + db)) * 255;
           const p = i * 4;
-          const cdist = colorDistance(data[p], data[p + 1], data[p + 2], bgColor);
-          const colorAlpha = smoothstep(colorTol, colorTol + colorFeather, cdist) * 255;
-          const grad = Math.min(1, localGradientMagnitude(data, width, height, x, y) / 90);
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          const grad = Math.min(1, localGradientMagnitude(data, width, height, x, y) / 100);
+          const cdistToGlobalBg = colorDistance(r, g, b, bgColor);
 
-          // Coarse segmentation is the owner. Geometry stabilizes the edge; color only influences the uncertain band.
-          let mixed = raw * 0.62 + geo * 0.30 + colorAlpha * 0.08;
+          const inDefiniteBg = raw <= bgCut && db <= 1.5;
+          const inDefiniteFg = raw >= fgCut && df <= 1.5;
+          if (inDefiniteBg) { finalAlpha[i] = 0; continue; }
+          if (inDefiniteFg) { finalAlpha[i] = 255; continue; }
 
-          // Strong visible edges should remain crisp, but this must not create rectangular/card outlines.
-          if (raw > 36 && raw < 220 && grad > 0.35) {
-            mixed = mixed * 0.88 + raw * 0.12;
+          const boundaryBand = Math.max(10, baseRadius * (humanSubject ? 2.0 : 1.7));
+          const inUnknownBand = raw > bgCut && raw < fgCut || df <= boundaryBand || db <= boundaryBand;
+          let matteAlpha = null;
+          let matteReliability = 0;
+
+          if (inUnknownBand) {
+            const samples = sampleLocalFgBgColors(data, width, height, fgSeed, bgSeed, x, y, baseRadius);
+            if (samples) {
+              const matte = alphaFromLocalColors(r, g, b, samples.f, samples.b);
+              if (matte) {
+                matteAlpha = matte.alpha;
+                matteReliability = matte.reliability;
+              }
+            }
           }
 
-          // Gentle contrast curve: cuts halos without eating semi-transparent plastic/soft food edges.
-          const curved = smoothstep(10, 246, mixed) * 255;
-          finalAlpha[i] = clampByte(curved);
+          let mixed;
+          if (matteAlpha !== null && matteReliability > 0.12) {
+            // Local alpha compositing dominates only where foreground/background colors are actually separable.
+            const mW = humanSubject ? 0.20 * matteReliability : 0.28 * matteReliability;
+            const rW = humanSubject ? 0.64 : 0.52;
+            const gW = Math.max(0.12, 1 - rW - mW);
+            mixed = raw * rW + geo * gW + matteAlpha * mW;
+          } else {
+            mixed = humanSubject ? raw * 0.72 + geo * 0.28 : raw * 0.60 + geo * 0.40;
+          }
+
+          // 경계가 분명한 곳은 AI가 낮게 준 alpha를 무조건 버리지 않습니다.
+          if (raw > 12 && grad > 0.32 && cdistToGlobalBg > 10) {
+            mixed = Math.max(mixed, raw * (humanSubject ? 1.08 : 0.98));
+          }
+
+          if (humanSubject && subjectStats) {
+            const upperEdge = subjectStats.minY + subjectStats.boxH * 0.64;
+            const inSubjectColumn = x >= subjectStats.minX - 3 && x <= subjectStats.maxX + 3 && y >= subjectStats.minY - 3 && y <= subjectStats.maxY + 3;
+            const hairOrSkin = isHairLikePixel(r, g, b) || isSkinLikePixel(r, g, b);
+            if (inSubjectColumn && y <= upperEdge && raw > 10 && grad > 0.16 && hairOrSkin) {
+              mixed = Math.max(mixed, raw * 1.16 + 12);
+            }
+            if (inSubjectColumn && raw > 18 && grad > 0.25 && cdistToGlobalBg > 12) {
+              mixed = Math.max(mixed, raw * 1.04 + 8);
+            }
+          }
+
+          const low = humanSubject ? 3 : 5;
+          const high = humanSubject ? 253 : 250;
+          finalAlpha[i] = clampByte(smoothstep(low, high, mixed) * 255);
         }
       }
 
-      removeBorderConnectedLowAlpha(finalAlpha, width, height, quality === "high" ? 72 : 86);
-      return edgeAwareAlphaSmooth(finalAlpha, data, width, height, quality === "high" ? 2 : 1);
+      removeBorderConnectedLowAlpha(finalAlpha, width, height, humanSubject ? (highQuality ? 24 : 36) : (highQuality ? 42 : 58));
+      removeTinyAlphaSpeckles(finalAlpha, width, height, Math.max(18, Math.round(total * 0.00005)));
+      fillSmallTransparentPinholes(finalAlpha, width, height, Math.max(24, Math.round(total * 0.00018)));
+      const smoothed = guidedBoundarySmooth(finalAlpha, data, width, height, highQuality ? 2 : 1);
+      return edgeAwareAlphaSmooth(smoothed, data, width, height, humanSubject ? 1 : 1);
     }
 
     async function rebuildPngWithSegmentationMatting(originalFile, maskBlob, outputScale = 1) {
@@ -4729,7 +5153,7 @@
 
       const originalData = originalCtx.getImageData(0, 0, width, height);
       const maskData = maskCtx.getImageData(0, 0, width, height);
-      const segmentationAlpha = extractAlphaArray(maskData, width, height);
+      const segmentationAlpha = extractSegmentationConfidence(maskData, width, height);
       const finalAlpha = buildMattingAlphaFromSegmentation(originalData.data, width, height, segmentationAlpha, qualitySelect.value || "high");
       const outputData = outputCtx.createImageData(width, height);
 
@@ -4882,7 +5306,7 @@
       };
 
       const segmentationBlob = await removeFn(file, config);
-      onProgress?.("2단계 고해상도 Matting", 88);
+      onProgress?.("2단계 Trimap + Edge Matting", 88);
       return rebuildPngWithSegmentationMatting(file, segmentationBlob, getOutputScale());
     }
 
@@ -5356,8 +5780,10 @@
 
           if (currentTool === "removeBg") {
             const selectedEngine = engineSelect?.value || "two_stage_local";
+            const selectedSubjectType = subjectTypeSelect?.value || "auto";
+            const forceTwoStageForPerson = selectedSubjectType === "person";
 
-            if (selectedEngine === "background_only" || removeMode.value === "background_only") {
+            if (!forceTwoStageForPerson && (selectedEngine === "background_only" || removeMode.value === "background_only")) {
               setProgress(`${item.file.name} · 배경 분석 중`, overallPercent(i, targets.length, 25));
               blob = await removeConnectedBackground(item.file, qualitySelect.value, sensitivitySelect.value, getOutputScale());
               setProgress(`${item.file.name} · 투명 PNG 생성`, overallPercent(i, targets.length, 80));
@@ -5367,7 +5793,7 @@
               });
             } else {
               blob = await runAiForegroundMode(item.file, (label, sub) => {
-                setProgress(`${item.file.name} · 2단계 로컬 · ${label}`, overallPercent(i, targets.length, sub));
+                setProgress(`${item.file.name} · 2단계 로컬 Matting · ${label}`, overallPercent(i, targets.length, sub));
               });
             }
 
@@ -5624,12 +6050,14 @@
 
     function syncRemoveModeRows() {
       const engine = engineSelect?.value || "two_stage_local";
-      const isBackgroundOnly = engine === "background_only" || removeMode.value === "background_only";
+      const subjectType = subjectTypeSelect?.value || "auto";
+      const isBackgroundOnly = subjectType !== "person" && (engine === "background_only" || removeMode.value === "background_only");
       modelRow.style.display = isBackgroundOnly ? "none" : "block";
       sensitivityRow.style.display = isBackgroundOnly ? "block" : "none";
     }
 
     engineSelect?.addEventListener("change", syncRemoveModeRows);
+    subjectTypeSelect?.addEventListener("change", syncRemoveModeRows);
     removeMode.addEventListener("change", syncRemoveModeRows);
     syncRemoveModeRows();
     paddingSelect.disabled = !cropToggle.checked;
