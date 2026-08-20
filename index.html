@@ -1262,7 +1262,9 @@
         <div class="actions">
           <button id="startBtn" class="btn-primary" disabled>배경 제거 실행</button>
           <button id="downloadPngBtn" class="btn-secondary" disabled>개별 파일 다운로드</button>
+          <button id="downloadPsdBtn" class="btn-secondary" disabled>PSD 마스크 다운로드</button>
           <button id="downloadZipBtn" class="btn-secondary" disabled>전체 결과 ZIP 다운로드</button>
+          <button id="downloadPsdZipBtn" class="btn-secondary" disabled>PSD 전체 ZIP 다운로드</button>
           <button id="resetAllBtn" class="btn-secondary" disabled>전체 초기화</button>
         </div>
 
@@ -1343,6 +1345,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module">
+    // v9.3: PSD 레이어 마스크 내보내기 추가
     const moduleUrl = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm";
 
     // ---- DOM refs ----
@@ -1419,7 +1422,9 @@
 
     const startBtn = document.getElementById("startBtn");
     const downloadPngBtn = document.getElementById("downloadPngBtn");
+    const downloadPsdBtn = document.getElementById("downloadPsdBtn");
     const downloadZipBtn = document.getElementById("downloadZipBtn");
+    const downloadPsdZipBtn = document.getElementById("downloadPsdZipBtn");
     const resetAllBtn = document.getElementById("resetAllBtn");
 
     const progressWrap = document.getElementById("progressWrap");
@@ -1694,7 +1699,9 @@
 
       startBtn.disabled = isProcessing || queueItems.length === 0;
       downloadPngBtn.disabled = isProcessing || !hasDone;
+      downloadPsdBtn.disabled = isProcessing || !hasDone || currentTool !== "removeBg";
       downloadZipBtn.disabled = isProcessing || !hasDone;
+      downloadPsdZipBtn.disabled = isProcessing || !hasDone || currentTool !== "removeBg";
       resetAllBtn.disabled = isProcessing || queueItems.length === 0;
     }
 
@@ -2174,6 +2181,211 @@
         console.error(error);
         setError("ZIP 생성에 실패했습니다. 파일 개수를 줄이거나 다시 시도하세요.");
       } finally {
+        updateActionStates();
+      }
+    }
+
+
+
+    // ---- PSD mask export ----
+    function loadExternalScript(src) {
+      return new Promise((resolve, reject) => {
+        const existing = Array.from(document.scripts).find((script) => script.src === src);
+        if (existing) {
+          if (window.agPsd?.writePsd) { resolve(); return; }
+          existing.addEventListener("load", resolve, { once: true });
+          existing.addEventListener("error", () => reject(new Error(`${src} 로드 실패`)), { once: true });
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`${src} 로드 실패`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensurePsdWriter() {
+      if (!window.agPsd?.writePsd) {
+        await loadExternalScript("https://cdn.jsdelivr.net/npm/ag-psd@30.2.0/dist/bundle.js");
+      }
+      if (!window.agPsd?.writePsd) {
+        throw new Error("PSD 작성 모듈을 불러오지 못했습니다.");
+      }
+      return window.agPsd;
+    }
+
+    function imageToCanvas(image, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, 0, 0, width, height);
+      return canvas;
+    }
+
+    function makeOpaqueRgbCanvasFromImageData(imageData, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      const copy = new ImageData(new Uint8ClampedArray(imageData.data), width, height);
+      for (let i = 3; i < copy.data.length; i += 4) copy.data[i] = 255;
+      ctx.putImageData(copy, 0, 0);
+      return canvas;
+    }
+
+    function makeMaskCanvasFromAlpha(imageData, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      const mask = ctx.createImageData(width, height);
+      for (let i = 0; i < width * height; i++) {
+        const a = imageData.data[i * 4 + 3];
+        const p = i * 4;
+        mask.data[p] = a;
+        mask.data[p + 1] = a;
+        mask.data[p + 2] = a;
+        mask.data[p + 3] = 255;
+      }
+      ctx.putImageData(mask, 0, 0);
+      return canvas;
+    }
+
+    async function buildPsdMaskBlob(item) {
+      if (!item || item.status !== "done" || !item.resultBlob || item.resultExt !== "png") {
+        throw new Error("PSD는 배경 제거가 완료된 PNG 결과에서만 만들 수 있습니다.");
+      }
+
+      const agPsd = await ensurePsdWriter();
+      const [resultImage, originalImage] = await Promise.all([
+        blobToImage(item.resultBlob),
+        blobToImage(item.file).catch(() => null)
+      ]);
+
+      const width = resultImage.naturalWidth || resultImage.width;
+      const height = resultImage.naturalHeight || resultImage.height;
+      const resultCanvasEl = imageToCanvas(resultImage, width, height);
+      const resultCtx = resultCanvasEl.getContext("2d", { willReadFrequently: true });
+      const resultData = resultCtx.getImageData(0, 0, width, height);
+      const maskCanvasEl = makeMaskCanvasFromAlpha(resultData, width, height);
+
+      let sourceCanvasEl = null;
+      let sourceNote = "원본 RGB + 레이어 마스크";
+
+      if (originalImage) {
+        const ow = originalImage.naturalWidth || originalImage.width;
+        const oh = originalImage.naturalHeight || originalImage.height;
+        if (ow === width && oh === height) {
+          sourceCanvasEl = imageToCanvas(originalImage, width, height);
+        }
+      }
+
+      if (!sourceCanvasEl) {
+        // 자동 크롭/2x/4x 등으로 원본과 결과 크기가 달라진 경우에는 결과 RGB를 기준으로 PSD를 만듭니다.
+        // 이때도 투명도는 픽셀 알파가 아니라 PSD 레이어 마스크에 따로 들어갑니다.
+        sourceCanvasEl = makeOpaqueRgbCanvasFromImageData(resultData, width, height);
+        sourceNote = "결과 RGB + 레이어 마스크";
+      }
+
+      const cleanName = item.file.name.replace(/\.[^.]+$/, "");
+      const psd = {
+        width,
+        height,
+        canvas: resultCanvasEl,
+        children: [
+          {
+            name: `${cleanName} · ${sourceNote}`,
+            canvas: sourceCanvasEl,
+            mask: {
+              top: 0,
+              left: 0,
+              bottom: height,
+              right: width,
+              defaultColor: 0,
+              disabled: false,
+              positionRelativeToLayer: false,
+              fromVectorData: false,
+              userMaskDensity: 255,
+              userMaskFeather: 0,
+              canvas: maskCanvasEl
+            }
+          },
+          {
+            name: "투명 PNG 결과 백업",
+            canvas: resultCanvasEl,
+            hidden: true
+          },
+          {
+            name: "Alpha Mask Preview",
+            canvas: maskCanvasEl,
+            hidden: true
+          }
+        ],
+        imageResources: {
+          versionInfo: {
+            hasRealMergedData: true,
+            writerName: "Remover Studio",
+            readerName: "Adobe Photoshop",
+            fileVersion: 1
+          }
+        }
+      };
+
+      const buffer = agPsd.writePsd(psd, { generateThumbnail: true });
+      return new Blob([buffer], { type: "application/octet-stream" });
+    }
+
+    async function downloadSelectedPsd() {
+      const item = getSelectedItem() || queueItems.find((it) => it.status === "done" && it.resultBlob && it.resultExt === "png");
+      if (!item) return;
+      const originalText = downloadPsdBtn.textContent;
+      downloadPsdBtn.disabled = true;
+      downloadPsdBtn.textContent = "PSD 생성 중...";
+      setError("");
+      try {
+        const psdBlob = await buildPsdMaskBlob(item);
+        const cleanName = item.file.name.replace(/\.[^.]+$/, "");
+        triggerDownload(psdBlob, null, `${cleanName}_mask.psd`);
+      } catch (error) {
+        console.error(error);
+        setError("PSD 마스크 파일 생성에 실패했습니다. 배경 제거 완료 후 다시 시도하세요.");
+      } finally {
+        downloadPsdBtn.textContent = originalText;
+        updateActionStates();
+      }
+    }
+
+    async function downloadPsdZip() {
+      const doneItems = queueItems.filter((it) => it.status === "done" && it.resultBlob && it.resultExt === "png");
+      if (!doneItems.length) return;
+      const originalText = downloadPsdZipBtn.textContent;
+      downloadPsdZipBtn.disabled = true;
+      downloadPsdZipBtn.textContent = "PSD ZIP 생성 중...";
+      setError("");
+      try {
+        const zip = new JSZip();
+        const usedNames = new Set();
+        for (const item of doneItems) {
+          const psdBlob = await buildPsdMaskBlob(item);
+          const base = item.file.name.replace(/\.[^.]+$/, "");
+          let name = `${base}_mask.psd`;
+          let n = 1;
+          while (usedNames.has(name)) { name = `${base}_mask(${n}).psd`; n++; }
+          usedNames.add(name);
+          zip.file(name, psdBlob);
+        }
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        triggerDownload(zipBlob, null, `psd_mask_${doneItems.length}files.zip`);
+      } catch (error) {
+        console.error(error);
+        setError("PSD ZIP 생성에 실패했습니다.");
+      } finally {
+        downloadPsdZipBtn.textContent = originalText;
         updateActionStates();
       }
     }
@@ -5755,7 +5967,9 @@
       startBtn.disabled = true;
       resetAllBtn.disabled = true;
       downloadPngBtn.disabled = true;
+      downloadPsdBtn.disabled = true;
       downloadZipBtn.disabled = true;
+      downloadPsdZipBtn.disabled = true;
       setState(`처리 중 · 0/${targets.length}`);
 
       let failCount = 0;
@@ -6177,7 +6391,9 @@
 
     startBtn.addEventListener("click", processQueue);
     downloadPngBtn.addEventListener("click", downloadAllPng);
+    downloadPsdBtn.addEventListener("click", downloadSelectedPsd);
     downloadZipBtn.addEventListener("click", downloadZip);
+    downloadPsdZipBtn.addEventListener("click", downloadPsdZip);
     resetAllBtn.addEventListener("click", resetAll);
     compareRange.addEventListener("input", (event) => updateCompare(event.target.value));
 

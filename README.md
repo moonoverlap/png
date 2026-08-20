@@ -127,3 +127,10 @@ http://localhost:5173
 - 머리카락, 손, 소매, 가방끈, 종이 태그 같은 얇은 피사체 경계 보존 강화
 - 피사체 유형 선택 옵션 추가
 - API 없이 로컬 Segmentation + Matting 유지
+
+
+## v93 PSD 마스크 내보내기
+
+- 투명 PNG 결과의 alpha를 PSD 레이어 마스크로 변환합니다.
+- PSD 안에는 `원본/결과 RGB + 레이어 마스크`, `투명 PNG 결과 백업`, `Alpha Mask Preview` 레이어가 포함됩니다.
+- 브라우저에서 `ag-psd`를 동적 로드하여 PSD를 생성합니다.
